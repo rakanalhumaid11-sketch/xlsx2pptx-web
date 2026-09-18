@@ -1,18 +1,37 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="card">
-  <h1>وش تحتاج تسوي؟</h1>
-  <p class="hint">اختر أحد الخيارين. كل شي يتم على المتصفح مباشرة، ما تحتاج تثبّت أي برنامج.</p>
+  <h1>📊 تقرير صيانة المغذي</h1>
+  <p class="hint">
+    ارفع ملف الإكسل فقط. القالب محفوظ داخل الموقع، وعدد الشرائح وأسماء المغذي
+    والمحطة والجدول تُقرأ من الملف تلقائيًا.
+  </p>
+
+  {% if error %}<div class="errors">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ url_for('start') }}" enctype="multipart/form-data">
+    <label class="field">
+      <span class="field-label">ملف الإكسل (‎.xlsx‎)</span>
+      <input type="file" name="excel_file" accept=".xlsx,.xlsm" required>
+    </label>
+
+    <label class="field">
+      <span class="field-label">رقم إشعار الفحص <em>(اختياري)</em></span>
+      <input type="text" name="notice" placeholder="مثال: 4121050117" inputmode="numeric">
+      <span class="hint">إن تركته فارغًا، لن يُكتب رقم الإشعار في التقرير.</span>
+    </label>
+
+    <button class="btn" type="submit">🚀 توليد التقرير</button>
+  </form>
 </div>
 
-<div class="choice-grid">
-  <a class="choice-card" href="{{ url_for('new_form') }}">
-    <div class="title">📄 توليد تقرير جديد</div>
-    <div class="desc">رفع ملف إكسل الملاحظات + قالب البوربوينت، وتوليد نسخة كاملة سلايد لكل ملاحظة.</div>
-  </a>
-  <a class="choice-card" href="{{ url_for('after_form') }}">
-    <div class="title">🖼️ إضافة صور "بعد المعالجة"</div>
-    <div class="desc">رفع تقرير تم توليده سابقًا وإضافة صور المعالجة التي أصبحت متوفرة الآن.</div>
-  </a>
+<div class="card">
+  <h2>ماذا سيحتوي التقرير؟</h2>
+  <ul class="plain">
+    <li>شريحة الغلاف باسم المغذي وتاريخ اليوم.</li>
+    <li>شريحة الملخص: إجمالي الملاحظات، عدد أنواعها، وجدول بعدد تكرار كل ملاحظة (يمتد لشريحة إضافية إذا زادت الأنواع).</li>
+    <li>شريحة لكل ملاحظة تحتوي صورة "قبل" والإحداثيات والمكتب ووصف الملاحظة، وخانة "بعد" تبقى فارغة.</li>
+    <li>شريحة الشكر في النهاية.</li>
+  </ul>
 </div>
 {% endblock %}

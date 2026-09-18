@@ -995,4 +995,3 @@ def load_mapping(path: str) -> Optional[Dict[str, Any]]:
         return None
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
-

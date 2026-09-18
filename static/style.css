@@ -155,3 +155,14 @@ table.mapping-table th { color: var(--muted); font-weight: 600; }
 
 footer { text-align: center; color: var(--muted); font-size: 0.82rem; margin: 30px 0 10px; }
 a.back-link { color: var(--muted); font-size: 0.9rem; }
+
+/* --- صفحة الرفع الجديدة --- */
+.hint { color: var(--muted); font-size: 0.92rem; display: block; margin-top: 6px; }
+.field { display: block; margin: 18px 0; font-weight: 600; }
+.field-label { display: block; margin-bottom: 6px; }
+.field-label em { font-weight: 400; color: var(--muted); font-style: normal; }
+ul.plain { margin: 10px 0 0; padding-inline-start: 20px; line-height: 1.9; font-size: 0.95rem; }
+.stats { list-style: none; padding: 0; margin: 14px 0 0; }
+.stats li { padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 0.95rem; }
+.stats li:last-child { border-bottom: none; }
+.stats b { color: var(--primary); }

@@ -2,13 +2,15 @@
 {% block content %}
 <div class="card">
   <h1 id="statusTitle">⏳ جاري توليد التقرير...</h1>
-  <p class="hint" id="statusHint">هذا يشمل تنزيل الصور من الروابط وتوليد كل سلايد — قد يستغرق دقيقة أو أكثر بحسب عدد الملاحظات.</p>
+  <p class="hint" id="statusHint">يشمل هذا تنزيل صور الملاحظات وبناء كل شريحة — قد يستغرق عدة دقائق بحسب عدد الملاحظات. لا تغلق الصفحة.</p>
   <div class="progress-wrap">
     <div class="progress-bar" id="bar">0%</div>
   </div>
   <div id="errorBox"></div>
   <div id="downloadBox" style="display:none;">
     <a class="btn" id="downloadLink" href="#">⬇️ تحميل التقرير</a>
+    <ul class="stats" id="stats"></ul>
+    <p><a class="back-link" href="{{ url_for('index') }}">↻ توليد تقرير آخر</a></p>
   </div>
 </div>
 
@@ -18,6 +20,7 @@ function poll() {
   fetch("/job/" + jobId + "/status").then(r => r.json()).then(data => {
     if (data.stage === "error") {
       document.getElementById("statusTitle").textContent = "❌ حدث خطأ";
+      document.getElementById("statusHint").textContent = "";
       document.getElementById("errorBox").innerHTML = '<div class="errors">' + (data.error_message || "خطأ غير معروف") + '</div>';
       return;
     }
@@ -32,6 +35,14 @@ function poll() {
       document.getElementById("statusHint").textContent = "";
       var dl = document.getElementById("downloadLink");
       dl.href = "/job/" + jobId + "/download";
+      var r = data.result || {};
+      document.getElementById("stats").innerHTML =
+        "<li>المغذي: <b>" + (r.feeder || "—") + "</b></li>" +
+        "<li>عدد الملاحظات: <b>" + (r.records || 0) + "</b></li>" +
+        "<li>عدد أنواع الملاحظات: <b>" + (r.types || 0) + "</b></li>" +
+        "<li>إجمالي الشرائح: <b>" + (r.slides || 0) + "</b></li>" +
+        "<li>صور تم إدراجها: <b>" + (r.photos_ok || 0) + "</b>" +
+        (r.photos_missing ? " — بدون صورة: <b>" + r.photos_missing + "</b>" : "") + "</li>";
       document.getElementById("downloadBox").style.display = "block";
       return;
     }

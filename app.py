@@ -358,7 +358,12 @@ def _run_generation(job_id: str):
                 v = rec.get(key)
                 if v:
                     urls.append(str(v).strip())
-        image_cache = engine.prefetch_images(urls, progress_cb=progress_cb)
+        # عدد أقل من التنزيلات المتوازية على خوادم الاستضافة المجانية (موارد
+        # محدودة جدًا)، بدل 16 المستخدمة أثناء التطوير على جهاز أقوى —
+        # تفاديًا لضغط الذاكرة/المعالج اللي يخلي Gunicorn يعتبر الخادم متجمدًا
+        # ويعيد تشغيله بمنتصف التوليد. قابل للتعديل عبر متغير بيئة عند الحاجة.
+        max_img_workers = int(os.environ.get("MAX_IMAGE_WORKERS", "4"))
+        image_cache = engine.prefetch_images(urls, max_workers=max_img_workers, progress_cb=progress_cb)
 
         result = engine.generate_report(
             prs, state["master_index"], (state["start0"], state["end0"]),
@@ -528,3 +533,4 @@ def after_download(job_id):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
+

@@ -116,23 +116,63 @@ class SheetInfo:
     n_rows: int
 
 
+def _is_text_like(v) -> bool:
+    """True لو القيمة نص وصفي (تسمية عمود محتملة) لا رقم صرف. صف الرؤوس
+    الحقيقي يكون شبه كامل بنصوص من هذا النوع، بعكس صفوف البيانات التي فيها
+    غالبًا أعمدة رقمية/تاريخ (رقم تسلسلي، إحداثيات، تواريخ...) تُخفّض نسبة
+    "النصية" فيها حتى لو كانت كل خلاياها معبّأة."""
+    if v is None:
+        return False
+    if isinstance(v, (int, float)):
+        return False
+    import datetime as _dt
+    if isinstance(v, (_dt.date, _dt.datetime)):
+        return False
+    s = str(v).strip()
+    if not s:
+        return False
+    try:
+        float(s)
+        return False  # نص لكنه رقم صرف مكتوب كنص (مثل رقم إشعار)
+    except ValueError:
+        return True
+
+
+def _detect_header_row(ws, max_scan: int = 15) -> int:
+    """يخمّن رقم صف رأس الأعمدة الحقيقي بدل افتراض أنه دائمًا أول صف. بعض
+    الملفات فيها صف عنوان (مثل "تقرير ملاحظات المغذي" بخلية واحدة مدمجة) قبل
+    صف الرؤوس الفعلي. المعيار: صف الرؤوس الحقيقي يكون شبه كامل بتسميات
+    نصية عبر كل الأعمدة، بعكس صف عنوان (خلية أو خليتين فقط) أو صف بيانات
+    (فيه عادة أعمدة رقمية/تاريخ تُخفّض عدد الخلايا "النصية" فيه) — لذلك نعتمد
+    عدد الخلايا النصية الوصفية كمقياس أساسي بدل مجرد عدّ الخلايا غير الفارغة."""
+    best_idx, best_score = 0, (-1, -1)
+    for i, row in enumerate(ws.iter_rows(values_only=True)):
+        if i >= max_scan:
+            break
+        text_like = sum(1 for v in row if _is_text_like(v))
+        non_empty = sum(1 for v in row if v is not None and str(v).strip() != "")
+        score = (text_like, non_empty)
+        if score > best_score:
+            best_score, best_idx = score, i
+    return best_idx
+
+
 def list_sheets_with_headers(path: str) -> List[SheetInfo]:
     """يفتح ملف الإكسل (read-only لتفادي استهلاك الذاكرة) ويعيد لكل ورقة
-    اسمها وصف رأس الأعمدة (يفترض أنه أول صف غير فارغ) وعدد الصفوف."""
+    اسمها وصف رأس الأعمدة (بعد تخمين رقم صف الرؤوس الحقيقي) وعدد الصفوف."""
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     infos = []
     for name in wb.sheetnames:
         ws = wb[name]
-        header_row_idx = 0
+        header_row_idx = _detect_header_row(ws)
         headers: List[str] = []
         n_rows = 0
         for i, row in enumerate(ws.iter_rows(values_only=True)):
-            if i == 0:
+            if i == header_row_idx:
                 headers = ["" if v is None else str(v) for v in row]
-                header_row_idx = i
             n_rows += 1
         infos.append(SheetInfo(name=name, header_row_idx=header_row_idx,
-                                headers=headers, n_rows=max(n_rows - 1, 0)))
+                                headers=headers, n_rows=max(n_rows - header_row_idx - 1, 0)))
     wb.close()
     return infos
 
@@ -159,12 +199,13 @@ def suggest_column_mapping(headers: List[str]) -> Dict[str, Optional[int]]:
 
 
 def read_rows(path: str, sheet_name: str) -> List[List[Any]]:
-    """يرجع كل صفوف البيانات (بدون رأس الأعمدة) كقوائم خام."""
+    """يرجع كل صفوف البيانات (بعد تخطي صف عنوان محتمل وصف الرؤوس الحقيقي) كقوائم خام."""
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     ws = wb[sheet_name]
+    header_row_idx = _detect_header_row(ws)
     rows = []
     for i, row in enumerate(ws.iter_rows(values_only=True)):
-        if i == 0:
+        if i <= header_row_idx:
             continue
         rows.append(list(row))
     wb.close()
@@ -948,3 +989,4 @@ def load_mapping(path: str) -> Optional[Dict[str, Any]]:
         return None
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+

@@ -326,8 +326,14 @@ def _attach_nearby_labels(target_roles: List[ShapeRole], constant_labels: List[S
             if lbl.top >= role.top:
                 continue
             overlap = min(lbl.left + lbl.width, role.left + role.width) - max(lbl.left, role.left)
-            min_width = min(lbl.width, role.width) or 1
-            if overlap <= 0 or (overlap / min_width) < MIN_LABEL_OVERLAP_FRAC:
+            # نقيس نسبة التداخل بالنسبة لعرض "التسمية" نفسها (وليس أصغر عرض بين
+            # الاثنين): شكل عريض جدًا يمتد على كامل عرض السلايد (مثل شريط عنوان)
+            # قد يتقاطع بالكامل مع شكل هدف ضيّق فيظهر تداخل 100% حسب المقياس
+            # القديم (min(lbl.width, role.width)) رغم أنه لا يمثّل تسمية مخصّصة
+            # لهذا الشكل تحديدًا. القياس الجديد يرفض هذه الحالة لأن التداخل لا
+            # يمثل إلا جزءًا صغيرًا من عرض التسمية العريضة نفسها.
+            lbl_width = lbl.width or 1
+            if overlap <= 0 or (overlap / lbl_width) < MIN_LABEL_OVERLAP_FRAC:
                 continue
             dist = role.top - (lbl.top + lbl.height)
             if -30000 <= dist <= MAX_LABEL_GAP and (best_dist is None or dist < best_dist):

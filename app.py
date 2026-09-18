@@ -352,18 +352,24 @@ def _run_generation(job_id: str):
             write_state(d, st)
 
         prs = Presentation(state["pptx_path"])
-        urls = []
-        for rec in records:
-            for key in ("photo_before", "photo_after"):
-                v = rec.get(key)
-                if v:
-                    urls.append(str(v).strip())
-        # عدد أقل من التنزيلات المتوازية على خوادم الاستضافة المجانية (موارد
-        # محدودة جدًا)، بدل 16 المستخدمة أثناء التطوير على جهاز أقوى —
-        # تفاديًا لضغط الذاكرة/المعالج اللي يخلي Gunicorn يعتبر الخادم متجمدًا
-        # ويعيد تشغيله بمنتصف التوليد. قابل للتعديل عبر متغير بيئة عند الحاجة.
-        max_img_workers = int(os.environ.get("MAX_IMAGE_WORKERS", "4"))
-        image_cache = engine.prefetch_images(urls, max_workers=max_img_workers, progress_cb=progress_cb)
+
+        # لا نُنزّل كل الصور دفعة واحدة إلى ذاكرة مشتركة قبل البدء: على
+        # الاستضافة المجانية (512MB فقط) هذا يعني تراكم مئات الصور بالذاكرة
+        # بنفس الوقت قبل استخدام أي منها، وهذا بالضبط ما سبّب توقف الخادم
+        # بسبب نفاد الذاكرة (Out of Memory) في محاولة سابقة. بدلاً من ذلك
+        # نستخدم "كاش" ينزّل كل صورة فقط لحظة استخدامها في سلايدها، ثم
+        # يُفرغها من الذاكرة فورًا بعد إدراجها — تبقى بالذاكرة صورة أو
+        # صورتين بحد أقصى بنفس اللحظة بدل كل الصور مجتمعة.
+        class _EvictOnUseCache(dict):
+            def __getitem__(self, key):
+                value = super().__getitem__(key)
+                try:
+                    del self[key]
+                except KeyError:
+                    pass
+                return value
+
+        image_cache = _EvictOnUseCache()
 
         result = engine.generate_report(
             prs, state["master_index"], (state["start0"], state["end0"]),

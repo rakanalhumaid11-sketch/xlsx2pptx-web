@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>إضافة صور "بعد المعالجة"</h1>
+  {% if errors %}
+  <div class="errors"><strong>تحقق من الآتي:</strong><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+  {% endif %}
+  <form action="{{ url_for('after_start') }}" method="post" enctype="multipart/form-data">
+    <label>1) ملف البوربوينت الذي تم توليده سابقًا</label>
+    <input type="file" name="pptx_file" accept=".pptx" required>
+
+    <div class="row2">
+      <div>
+        <label>2) رقم أول سلايد "ملاحظة" في الملف</label>
+        <input type="number" name="start_slide" min="1" required placeholder="مثلاً: 3">
+      </div>
+      <div>
+        <label>رقم آخر سلايد "ملاحظة" في الملف</label>
+        <input type="number" name="end_slide" min="1" required placeholder="مثلاً: 148">
+      </div>
+    </div>
+    <br>
+    <button class="btn" type="submit">متابعة ←</button>
+  </form>
+</div>
+{% endblock %}

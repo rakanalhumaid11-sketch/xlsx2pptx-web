@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>اختر ورقة العمل</h1>
+  <p class="hint">ملف الإكسل فيه أكثر من ورقة عمل، اختر الورقة التي فيها بيانات الملاحظات.</p>
+  <form action="{{ url_for('choose_sheet', job_id=job_id) }}" method="post">
+    <label>ورقة العمل</label>
+    <select name="sheet_name" required>
+      {% for s in sheets %}
+      <option value="{{ s.name }}">{{ s.name }} ({{ s.n_rows }} صف، {{ s.n_cols }} عمود)</option>
+      {% endfor %}
+    </select>
+    <br><br>
+    <button class="btn" type="submit">متابعة ←</button>
+  </form>
+</div>
+{% endblock %}

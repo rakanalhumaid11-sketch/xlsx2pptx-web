@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>مراجعة الربط قبل التوليد</h1>
+  <p class="hint">الأداة اقترحت هذا الربط تلقائيًا. راجعه بسرعة، وصحّح أي شي تحتاجه، ثم اضغط "توليد التقرير".</p>
+</div>
+
+<form action="{{ url_for('review_submit', job_id=job_id) }}" method="post" id="reviewForm">
+<input type="hidden" name="n_roles" value="{{ roles|length }}">
+
+<div class="card">
+  <h2>1) ربط أعمدة الإكسل بالحقول</h2>
+  <table class="mapping-table">
+    <thead><tr><th>الحقل</th><th>العمود في الإكسل</th></tr></thead>
+    <tbody>
+      {% for key, label in field_options %}
+      <tr>
+        <td>{{ label }}</td>
+        <td>
+          <select name="col_{{ key }}">
+            <option value="-1">-- لا يوجد --</option>
+            {% for idx, h in headers %}
+            <option value="{{ idx }}" {% if col_mapping_guess.get(key) == idx %}selected{% endif %}>{{ h if h else "(عمود بلا اسم)" }}</option>
+            {% endfor %}
+          </select>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>2) عناصر سلايد الملاحظة في القالب</h2>
+  <p class="hint">لكل عنصر متغيّر وجدته الأداة في السلايد، اختر ماذا يمثّل.</p>
+
+  {% for role in roles %}
+  <div class="role-card" data-index="{{ loop.index0 }}">
+    <div class="meta">
+      {% if role.shape_type == 'picture' %}🖼️ صورة{% else %}📝 نص{% endif %}
+      {% if role.nearby_label %} — التسمية القريبة: "{{ role.nearby_label }}"{% endif %}
+      {% if role.sample %} — مثال: "{{ role.sample }}"{% endif %}
+    </div>
+    <input type="hidden" name="role_{{ loop.index0 }}_geo_key" value='{{ role.geo_key }}'>
+
+    <label>هذا العنصر يمثّل:</label>
+    <select class="kind-select" name="role_{{ loop.index0 }}_kind" onchange="toggleSub({{ loop.index0 }})">
+      {% for k, lbl in kind_labels.items() %}
+        {% if role.shape_type == 'picture' and k not in ('skip', 'picture_before', 'picture_after') %}
+        {% elif role.shape_type == 'text' and k in ('picture_before', 'picture_after') %}
+        {% else %}
+        <option value="{{ k }}" {% if role.default_kind == k %}selected{% endif %}>{{ lbl }}</option>
+        {% endif %}
+      {% endfor %}
+    </select>
+
+    <div class="sub-fields" data-kind="field">
+      <label>الحقل من الإكسل</label>
+      <select name="role_{{ loop.index0 }}_field_key">
+        {% for key, label in field_options %}
+        <option value="{{ key }}" {% if role.default_field_key == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="sub-fields" data-kind="seq_title">
+      <div class="row2">
+        <div>
+          <label>مصدر الرقم</label>
+          <select name="role_{{ loop.index0 }}_title_source_field">
+            <option value="note_id" {% if role.default_title_source_field == 'note_id' %}selected{% endif %}>رقم الملاحظة (من الإكسل)</option>
+            <option value="seq" {% if role.default_title_source_field == 'seq' %}selected{% endif %}>ترقيم تسلسلي تلقائي</option>
+          </select>
+        </div>
+        <div>
+          <label>قالب العنوان</label>
+          <input type="text" name="role_{{ loop.index0 }}_title_template" value="{{ role.default_title_template }}">
+        </div>
+      </div>
+      <p class="hint">استخدم <code>{seq}</code> في مكان الرقم، مثل: معالجة الملاحظة رقم {seq}</p>
+    </div>
+
+    <div class="sub-fields" data-kind="coordinates">
+      <label><input type="checkbox" name="role_{{ loop.index0 }}_add_maps_link" checked style="width:auto;display:inline-block;"> إضافة رابط خرائط جوجل قابل للنقر</label>
+    </div>
+
+    <div class="sub-fields" data-kind="picture_before">
+      <label>عمود صورة "قبل" في الإكسل</label>
+      <select name="role_{{ loop.index0 }}_photo_field">
+        <option value="photo_before" selected>صورة قبل (أول عمود صور)</option>
+      </select>
+    </div>
+
+    <div class="sub-fields" data-kind="picture_after">
+      <label>عمود صورة "بعد" في الإكسل</label>
+      <select name="role_{{ loop.index0 }}_photo_field">
+        <option value="photo_after" selected>صورة بعد (ثاني عمود صور)</option>
+      </select>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <button class="btn" type="submit">🚀 توليد التقرير</button>
+  <a class="back-link" href="{{ url_for('new_form') }}">إلغاء والبدء من جديد</a>
+</div>
+</form>
+
+<script>
+function toggleSub(i) {
+  var card = document.querySelector('.role-card[data-index="' + i + '"]');
+  var kind = card.querySelector('.kind-select').value;
+  card.querySelectorAll('.sub-fields').forEach(function(el) {
+    el.classList.toggle('active', el.getAttribute('data-kind') === kind);
+  });
+}
+document.querySelectorAll('.role-card').forEach(function(card) {
+  toggleSub(parseInt(card.getAttribute('data-index'), 10));
+});
+</script>
+{% endblock %}

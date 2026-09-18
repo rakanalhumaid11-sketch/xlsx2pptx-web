@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>✅ تم الحفظ</h1>
+  <p>تمت إضافة {{ applied }} صورة. إجمالي الملاحظات المعالجة الآن: <strong>{{ resolved_count }}</strong>.</p>
+  <a class="btn" href="{{ url_for('after_download', job_id=job_id) }}">⬇️ تحميل الملف المحدّث</a>
+</div>
+{% endblock %}

@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: xlsx2pptx-web
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 180"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9

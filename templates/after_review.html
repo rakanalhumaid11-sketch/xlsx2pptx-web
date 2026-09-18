@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>الملاحظات التي بدون صورة "بعد"</h1>
+
+  {% if none_missing %}
+  <p>كل الملاحظات ضمن هذا النطاق عندها صورة "بعد" بالفعل — لا شيء لإضافته 🎉</p>
+  <a class="btn" href="{{ url_for('after_form') }}">رجوع</a>
+  {% else %}
+  <p class="hint">لكل ملاحظة: أدخل رابط الصورة، أو اختر ملف من جهازك. اتركها فاضية لتخطّيها الآن.</p>
+  <form action="{{ url_for('after_apply', job_id=job_id) }}" method="post" enctype="multipart/form-data">
+    {% for item in previews %}
+    <div class="missing-row">
+      <div class="note-text">سلايد رقم {{ item.slide_index + 1 }}: {{ item.text or "(بدون نص واضح)" }}</div>
+      <div class="row2">
+        <div>
+          <label>رابط الصورة</label>
+          <input type="text" name="url_{{ item.slide_index }}" placeholder="https://...">
+        </div>
+        <div>
+          <label>أو اختر ملف من جهازك</label>
+          <input type="file" name="file_{{ item.slide_index }}" accept="image/*">
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+    <button class="btn" type="submit">💾 حفظ الصور المُضافة</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

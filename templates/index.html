@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>وش تحتاج تسوي؟</h1>
+  <p class="hint">اختر أحد الخيارين. كل شي يتم على المتصفح مباشرة، ما تحتاج تثبّت أي برنامج.</p>
+</div>
+
+<div class="choice-grid">
+  <a class="choice-card" href="{{ url_for('new_form') }}">
+    <div class="title">📄 توليد تقرير جديد</div>
+    <div class="desc">رفع ملف إكسل الملاحظات + قالب البوربوينت، وتوليد نسخة كاملة سلايد لكل ملاحظة.</div>
+  </a>
+  <a class="choice-card" href="{{ url_for('after_form') }}">
+    <div class="title">🖼️ إضافة صور "بعد المعالجة"</div>
+    <div class="desc">رفع تقرير تم توليده سابقًا وإضافة صور المعالجة التي أصبحت متوفرة الآن.</div>
+  </a>
+</div>
+{% endblock %}

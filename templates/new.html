@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>تقرير جديد</h1>
+  {% if errors %}
+  <div class="errors"><strong>تحقق من الآتي:</strong><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+  {% endif %}
+
+  <form action="{{ url_for('new_start') }}" method="post" enctype="multipart/form-data">
+    <label>1) ملف الإكسل (فيه بيانات الملاحظات)</label>
+    <input type="file" name="excel_file" accept=".xlsx,.xlsm" required>
+
+    <label>2) قالب البوربوينت (نفس تصميم الشهر الماضي)</label>
+    <input type="file" name="pptx_file" accept=".pptx" required>
+    <p class="hint">القالب يحتوي على سلايدات "ملاحظة" جاهزة من الشهر الماضي، الأداة تحلّلها تلقائيًا وتستنسخها لكل صف جديد.</p>
+
+    <div class="row2">
+      <div>
+        <label>3) رقم أول سلايد "ملاحظة" في القالب</label>
+        <input type="number" name="start_slide" min="1" required placeholder="مثلاً: 3">
+      </div>
+      <div>
+        <label>رقم آخر سلايد "ملاحظة" في القالب</label>
+        <input type="number" name="end_slide" min="1" required placeholder="مثلاً: 148">
+      </div>
+    </div>
+    <p class="hint">يعني نطاق السلايدات القديمة التي ستُحذف ويُستبدل مكانها بالسلايدات الجديدة (سلايد الغلاف والملخص لا يُحسبان).</p>
+
+    <br>
+    <button class="btn" type="submit">متابعة ←</button>
+  </form>
+</div>
+{% endblock %}

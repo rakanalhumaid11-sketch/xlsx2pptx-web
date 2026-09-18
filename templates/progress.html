@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1 id="statusTitle">⏳ جاري توليد التقرير...</h1>
+  <p class="hint" id="statusHint">هذا يشمل تنزيل الصور من الروابط وتوليد كل سلايد — قد يستغرق دقيقة أو أكثر بحسب عدد الملاحظات.</p>
+  <div class="progress-wrap">
+    <div class="progress-bar" id="bar">0%</div>
+  </div>
+  <div id="errorBox"></div>
+  <div id="downloadBox" style="display:none;">
+    <a class="btn" id="downloadLink" href="#">⬇️ تحميل التقرير</a>
+  </div>
+</div>
+
+<script>
+var jobId = "{{ job_id }}";
+function poll() {
+  fetch("/job/" + jobId + "/status").then(r => r.json()).then(data => {
+    if (data.stage === "error") {
+      document.getElementById("statusTitle").textContent = "❌ حدث خطأ";
+      document.getElementById("errorBox").innerHTML = '<div class="errors">' + (data.error_message || "خطأ غير معروف") + '</div>';
+      return;
+    }
+    var p = data.progress || {done: 0, total: 1};
+    var pct = p.total > 0 ? Math.round((p.done / p.total) * 100) : 0;
+    var bar = document.getElementById("bar");
+    bar.style.width = pct + "%";
+    bar.textContent = pct + "%";
+
+    if (data.stage === "done") {
+      document.getElementById("statusTitle").textContent = "✅ التقرير جاهز!";
+      document.getElementById("statusHint").textContent = "";
+      var dl = document.getElementById("downloadLink");
+      dl.href = "/job/" + jobId + "/download";
+      document.getElementById("downloadBox").style.display = "block";
+      return;
+    }
+    setTimeout(poll, 1200);
+  }).catch(function() { setTimeout(poll, 2000); });
+}
+poll();
+</script>
+{% endblock %}

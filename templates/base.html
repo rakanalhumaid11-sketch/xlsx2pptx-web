@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}أداة تحويل الإكسل إلى بوربوينت{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="topbar"><a href="{{ url_for('index') }}">📊 أداة تحويل الإكسل إلى بوربوينت</a></div>
+  <div class="container">
+    {% block content %}{% endblock %}
+  </div>
+  <footer>يعمل هذا الموقع بالكامل على الإنترنت — لا حاجة لتثبيت شيء على جهازك.</footer>
+</body>
+</html>

@@ -170,14 +170,17 @@ def _run_generation(job_id: str):
 
             last = [0.0]
 
-            def progress_cb(done, total):
+            def progress_cb(done, total, source=None):
                 # نكتب الحالة مرة كل نصف ثانية على الأكثر حتى لا نُثقل القرص
                 now = time.time()
-                if now - last[0] < 0.5 and done < total:
+                if source is None and now - last[0] < 0.5 and done < total:
                     return
                 last[0] = now
                 s2 = read_state(d)
                 s2["progress"] = {"done": done, "total": total}
+                s2["updated_at"] = now
+                if source:
+                    s2["photo_source"] = source
                 write_state(d, s2)
 
             result = builder.build_report(
@@ -219,6 +222,10 @@ def job_status(job_id):
         "progress": state.get("progress", {"done": 0, "total": 1}),
         "error_message": state.get("error_message"),
         "result": state.get("result"),
+        "photo_source": state.get("photo_source"),
+        # ثوانٍ منذ آخر تقدّم فعلي: تستخدمها الصفحة لتنبّه المستخدم إن توقف
+        # التوليد بدل أن يظل ينتظر أمام شريط ساكن
+        "stalled_for": int(time.time() - state["updated_at"]) if state.get("updated_at") else 0,
     })
 
 

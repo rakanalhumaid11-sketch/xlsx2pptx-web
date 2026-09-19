@@ -11,6 +11,8 @@
     <div class="pct" id="pct">0%</div>
     <div class="progress-wrap"><div class="progress-bar" id="bar"></div></div>
     <span class="hint" id="counter"></span>
+    <span class="hint" id="source"></span>
+    <div id="stallBox"></div>
   </div>
 
   <div id="errorBox"></div>
@@ -51,6 +53,19 @@ function poll() {
     if (p.total > 1) {
       document.getElementById("counter").textContent = p.done + " من " + p.total + " ملاحظة";
     }
+
+    if (data.photo_source === "web") {
+      document.getElementById("source").textContent =
+        "الصور غير مخزّنة داخل ملف الإكسل، فتُنزَّل من الإنترنت — قد يستغرق ذلك عدة دقائق.";
+    } else if (data.photo_source === "file") {
+      document.getElementById("source").textContent = "الصور تُقرأ من داخل ملف الإكسل.";
+    }
+
+    // شريط ساكن لدقائق يعني غالبًا أن العملية توقفت على الخادم
+    document.getElementById("stallBox").innerHTML = (data.stalled_for > 180)
+      ? '<div class="errors">لم يتقدّم التوليد منذ ' + Math.round(data.stalled_for / 60) +
+        ' دقائق. يُرجَّح أن العملية توقفت على الخادم — أعد المحاولة، وإن تكرر الأمر فالملف كبير على الخطة المجانية.</div>'
+      : "";
 
     if (data.stage === "done") {
       var r = data.result || {};

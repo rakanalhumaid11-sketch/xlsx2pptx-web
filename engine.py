@@ -576,26 +576,54 @@ def prefetch_images(urls: List[str], max_workers: int = 16, progress_cb=None) ->
     return result
 
 
+# دقة الطباعة المستهدفة داخل صندوق الصورة. صور الجوال أكبر بكثير مما يحتاجه
+# صندوق بعرض ٢.٧ بوصة، وتخزينها بحجمها الكامل يضخّم الملف والذاكرة بلا فائدة
+# مرئية: عند ٣٠٠ نقطة/بوصة تبقى جودة الطباعة كاملة.
+TARGET_DPI = 300
+JPEG_QUALITY = 82
+
+
+def prepare_image_for_box(image_bytes: bytes, box_w: int, box_h: int):
+    """يصحّح اتجاه الصورة ويصغّرها لما يكفي الصندوق بدقة الطباعة، ويرجع
+    (البايتات، العرض، الارتفاع). يقلّل هذا حجم التقرير والذاكرة إلى نحو
+    النصف دون فرق تراه العين."""
+    from PIL import Image, ImageOps
+    im = Image.open(io.BytesIO(image_bytes))
+    # تصحيح الاتجاه حسب بيانات EXIF (بعض كاميرات الجوال تحفظ الصورة "مسطّحة"
+    # مع علم دوران في الميتاداتا؛ بدونه تظهر مستلقية على جنبها). هذا ليس
+    # تدويرًا نضيفه، بل إعادتها لوضعها الذي صُوّرت به.
+    fixed = ImageOps.exif_transpose(im)
+    transposed = fixed is not im
+    im = fixed
+
+    target_w = max(1, int(round(box_w / 914400 * TARGET_DPI)))
+    target_h = max(1, int(round(box_h / 914400 * TARGET_DPI)))
+    resized = im.width > target_w or im.height > target_h
+    if resized:
+        im.thumbnail((target_w, target_h), Image.LANCZOS)
+
+    if not (resized or transposed or len(image_bytes) > 400 * 1024):
+        return image_bytes, im.width, im.height
+
+    buf = io.BytesIO()
+    if im.mode in ("RGBA", "LA", "P"):
+        im.convert("RGBA").save(buf, format="PNG", optimize=True)
+    else:
+        im.convert("RGB").save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    out = buf.getvalue()
+    # لو لم نصغّر الأبعاد وخرجت النسخة الجديدة أكبر، نُبقي الأصل كما هو
+    if not resized and not transposed and len(out) >= len(image_bytes):
+        return image_bytes, im.width, im.height
+    return out, im.width, im.height
+
+
 def insert_picture_in_box(slide, box_left: int, box_top: int, box_w: int, box_h: int, image_bytes: bytes):
-    """يضيف صورة *داخل* مساحة محددة بدون أي قص أو تمديد أو تدوير: تصحيح
-    اتجاه EXIF أولًا، ثم حساب أبعاد الصورة الحقيقية وتصغيرها/تكبيرها بنفس
-    النسبة (Aspect Fit) لتناسب الصندوق، وتوسيطها بداخله."""
+    """يضيف صورة *داخل* مساحة محددة بدون أي قص أو تمديد أو تدوير: يهيّئ
+    الصورة (اتجاه + تصغير لدقة الطباعة)، ثم يحسب أبعادها بنفس النسبة
+    (Aspect Fit) لتناسب الصندوق، ويوسّطها بداخله."""
     new_left, new_top, new_w, new_h = box_left, box_top, box_w, box_h
     try:
-        from PIL import Image, ImageOps
-        im = Image.open(io.BytesIO(image_bytes))
-        # تصحيح الاتجاه حسب بيانات EXIF (بعض كاميرات الجوال تحفظ الصورة بشكل
-        # "مسطّح" مع علم دوران في الميتاداتا)؛ بدون هذا التصحيح تظهر الصورة
-        # مستلقية على جنبها. هذا ليس "تدويرًا" نضيفه نحن، بل إعادتها لوضعها
-        # الصحيح الذي صُوّرت به أصلًا.
-        fixed = ImageOps.exif_transpose(im)
-        if fixed is not im:
-            im = fixed
-            buf = io.BytesIO()
-            save_format = "PNG" if im.mode in ("RGBA", "LA", "P") else "JPEG"
-            im.convert("RGBA" if save_format == "PNG" else "RGB").save(buf, format=save_format, quality=92)
-            image_bytes = buf.getvalue()
-        iw, ih = im.size
+        image_bytes, iw, ih = prepare_image_for_box(image_bytes, box_w, box_h)
         if iw and ih and box_w and box_h:
             box_ratio = box_w / box_h
             img_ratio = iw / ih

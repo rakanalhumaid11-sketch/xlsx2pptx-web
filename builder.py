@@ -29,6 +29,9 @@ IDX_COVER, IDX_SUMMARY, IDX_NOTE, IDX_THANKS = 0, 1, 2, 3
 # سعة جدول الملخص في الشريحة الواحدة: 11 صفًا في العمود الأيمن + 10 في الأيسر
 ROWS_PER_SUMMARY = 21
 
+# عدد الملاحظات التي تُجهَّز صورها دفعة واحدة
+CHUNK = 16
+
 MONTHS_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
              "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
 
@@ -185,6 +188,7 @@ class ImageSource:
         self.map: Dict[str, str] = {}
         self.from_file = 0
         self.from_web = 0
+        self.max_workers = int(os.environ.get("IMAGE_WORKERS", "8"))
         try:
             self.zf = zipfile.ZipFile(xlsx_path)
             self.map = _embedded_image_map(self.zf)
@@ -210,6 +214,41 @@ class ImageSource:
                 self.from_web += 1
             return data
         return None
+
+    def get_many(self, urls: List[str]) -> Dict[str, Optional[bytes]]:
+        """يجلب مجموعة صور دفعة واحدة. الصور المخزّنة داخل الإكسل تُقرأ فورًا،
+        وما يحتاج تنزيلًا من الإنترنت يُنزَّل بالتوازي: تنزيل ستمئة صورة واحدة
+        تلو الأخرى قد يستغرق نصف ساعة، وبالتوازي دقائق معدودة."""
+        out: Dict[str, Optional[bytes]] = {}
+        need_web = []
+        for url in urls:
+            url = (url or "").strip()
+            if not url or url in out:
+                continue
+            path = self.map.get(url)
+            if path and self.zf is not None:
+                try:
+                    data = self.zf.read(path)
+                except (KeyError, OSError):
+                    data = None
+                if data:
+                    self.from_file += 1
+                    out[url] = data
+                    continue
+            if url.startswith("http"):
+                need_web.append(url)
+            else:
+                out[url] = None
+
+        if need_web:
+            from concurrent.futures import ThreadPoolExecutor
+            workers = min(self.max_workers, len(need_web))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                for url, data in zip(need_web, pool.map(engine.download_image, need_web)):
+                    out[url] = data
+                    if data:
+                        self.from_web += 1
+        return out
 
     def close(self):
         if self.zf is not None:
@@ -342,8 +381,11 @@ def fill_summary(slide, feeder: str, notice: str, totals: Optional[Dict[str, int
         drop(slide, "PH_TH_L_DESC")
 
 
+_UNSET = object()
+
+
 def fill_note(slide, rec: Dict[str, str], feeder: str, notice: str,
-              images: Optional["ImageSource"] = None) -> bool:
+              images: Optional["ImageSource"] = None, img=_UNSET) -> bool:
     """يملأ شريحة ملاحظة واحدة وينزّل صورتها. يرجع True إذا وُضعت صورة."""
     header = "صيانة المغذي"
     if feeder:
@@ -371,10 +413,11 @@ def fill_note(slide, rec: Dict[str, str], feeder: str, notice: str,
     if box is None:
         return False
     url = rec.get("photo1", "")
-    if images is not None:
-        img = images.get(url)
-    else:
-        img = engine.download_image(url) if url.startswith("http") else None
+    if img is _UNSET:
+        if images is not None:
+            img = images.get(url)
+        else:
+            img = engine.download_image(url) if url.startswith("http") else None
     if img:
         engine.replace_picture_shape(slide, box, img)
         return True
@@ -413,14 +456,28 @@ def build_report(excel_path: str, out_path: str, notice: str = "",
     photos_ok = 0
     total = len(records)
     images = ImageSource(excel_path)
+    if progress_cb:
+        # نُبلّغ مصدر الصور مبكرًا: القراءة من داخل الملف تستغرق ثوانٍ، أما
+        # التنزيل من الإنترنت فدقائق — والمستخدم يجب أن يعرف الفرق بدل أن
+        # يظن أن التوليد متوقف.
+        embedded = sum(1 for r in records[:20] if r.get("photo1") in images.map)
+        progress_cb(0, total, "file" if embedded > 10 else "web")
+
     try:
-        for i, rec in enumerate(records, 1):
-            idx = _dup(prs, IDX_NOTE)
-            note_indices.append(idx)
-            if fill_note(prs.slides[idx], rec, feeder, notice, images):
-                photos_ok += 1
-            if progress_cb:
-                progress_cb(i, total)
+        # نعالج على دفعات: ننزّل صور الدفعة بالتوازي ثم نبني شرائحها ونتخلص
+        # منها، فلا تتراكم الصور في الذاكرة مهما كان عدد الملاحظات.
+        for start in range(0, total, CHUNK):
+            chunk = records[start:start + CHUNK]
+            blobs = images.get_many([r.get("photo1", "") for r in chunk])
+            for j, rec in enumerate(chunk):
+                idx = _dup(prs, IDX_NOTE)
+                note_indices.append(idx)
+                img = blobs.get((rec.get("photo1", "") or "").strip())
+                if fill_note(prs.slides[idx], rec, feeder, notice, images, img=img):
+                    photos_ok += 1
+                if progress_cb:
+                    progress_cb(start + j + 1, total)
+            blobs.clear()
     finally:
         images.close()
 

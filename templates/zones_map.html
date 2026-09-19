@@ -9,8 +9,7 @@
     <p>{{ total }} ملاحظة على {{ zones|length }} زون{% if skipped %} · {{ skipped }} بلا إحداثيات{% endif %}{% if n_overrides %} · {{ n_overrides }} منقولة يدويًا{% endif %}</p>
   </div>
 
-  {% if not readonly %}
-  <form class="zone-bar" method="get" action="{{ url_for('zones_map', job_id=job_id) }}">
+    <form class="zone-bar" method="get" action="{{ url_for('zones_map', job_id=job_id) }}">
     <span class="zb-item">
       <label class="field-label" for="k">عدد الزونات</label>
       <input id="k" type="number" name="k" value="{{ k }}" min="1" max="{{ max_zones }}" inputmode="numeric">
@@ -29,26 +28,21 @@
 
   <div class="share-box">
     <div class="share-row">
-      <input type="text" id="shareUrl" value="{{ share_url }}" readonly dir="ltr">
-      <button type="button" class="btn" id="copyShare">نسخ رابط الخريطة</button>
-    </div>
-    <span class="hint">رابط واحد يفتح هذه الخريطة بكل الزونات وألوانها — أرسله للفرق كما هو.</span>
-    <div class="share-row" style="margin-top:12px">
-      <a class="btn btn-ghost" href="{{ url_for('zones_csv', job_id=job_id, k=k, slack=slack) }}">ملف «خرائطي» (CSV)</a>
-      <a class="btn btn-ghost" href="{{ url_for('zones_kml', job_id=job_id, k=k, slack=slack) }}">ملف KML</a>
+      <a class="btn" href="{{ url_for('zones_kml', job_id=job_id, k=k, slack=slack) }}">تحميل ملف الزونات (KML)</a>
       <button type="button" class="btn btn-ghost" id="copyAll">نسخ مسارات كل الزونات</button>
       <span class="hint" id="copyAllMsg"></span>
     </div>
+    <span class="hint">استورده في «خرائطي» ثم شاركه — رابط قوقل دائم لا يعتمد على هذا الموقع.</span>
   </div>
 
   <details class="howto">
-    <summary>كيف أعرض الزونات على «خرائطي» بلون لكل زون؟</summary>
+    <summary>كيف أعرض الزونات على «خرائطي» وأشاركها؟</summary>
     <ol>
-      <li>نزّل ملف «خرائطي» (CSV) أعلاه.</li>
+      <li>نزّل ملف الزونات (KML) أعلاه.</li>
       <li>افتح <span dir="ltr">google.com/mymaps</span> ← إنشاء خريطة جديدة ← استيراد، واختر الملف.</li>
-      <li>يسألك عن أعمدة الموقع: اختر <b>خط العرض</b> و<b>خط الطول</b>. ثم عنوان العلامات: اختر <b>رقم الملاحظة</b>.</li>
-      <li>في الطبقة اضغط <b>تصنيف الأماكن حسب</b> ← <b>الزون</b>، فيصير لكل زون لون تلقائيًا.</li>
-      <li>اضغط <b>مشاركة</b> ← فعّل الرابط، وانسخه وأرسله للفرق. هذا رابط قوقل دائم لا يعتمد على موقعنا.</li>
+      <li>كل زون يصير <b>طبقة مستقلة</b> باسم مقاوله، ودبابيسه بلون مختلف عن بقية الزونات.</li>
+      <li>إن ظهرت الدبابيس بلون واحد، اضغط أيقونة <b>الدهان</b> بجانب اسم الطبقة واختر لونها — نقرة لكل زون.</li>
+      <li>اضغط <b>مشاركة</b> ← فعّل الرابط، وانسخه وأرسله للفرق.</li>
     </ol>
   </details>
 
@@ -58,11 +52,9 @@
     واضغط عليها لنقلها إلى زون آخر.
   </p>
   {% endif %}
-  {% endif %}
 
   <div id="map"></div>
 
-  {% if not readonly %}
   <form method="post" action="{{ url_for('zones_settings', job_id=job_id) }}">
     <input type="hidden" name="k" value="{{ k }}">
     <input type="hidden" name="slack" value="{{ slack }}">
@@ -108,41 +100,20 @@
     <input type="hidden" name="reset" value="1">
     {% if n_overrides %}<button class="btn btn-ghost" type="submit">إلغاء كل النقل اليدوي</button>{% endif %}
   </form>
-  {% else %}
-  <div class="zone-cards">
-    {% for z in zones %}
-    <div class="zone-card">
-      <div class="zc-head">
-        <span class="swatch" style="background: {{ z.color }}"></span>
-        <b>زون {{ z.index }}{% if z.name %} — {{ z.name }}{% endif %}</b>
-        <span class="zmeta">{{ z.count }} ملاحظة · مسار {{ z.route_km }} كم</span>
-      </div>
-      <div class="zc-links">
-        {% for lnk in z.links %}
-        <a class="chip" href="{{ lnk.url }}" target="_blank" rel="noopener">مسار {{ lnk.index }} ({{ lnk.stops }})</a>
-        {% endfor %}
-      </div>
-    </div>
-    {% endfor %}
   </div>
-  {% endif %}
 
-</div>
-
-{% if not readonly %}
 <form id="moveForm" method="post" action="{{ url_for('zones_move', job_id=job_id) }}" hidden>
   <input type="hidden" name="k" value="{{ k }}">
   <input type="hidden" name="slack" value="{{ slack }}">
   <input type="hidden" name="note_id" id="mvNote">
   <input type="hidden" name="zone" id="mvZone">
 </form>
-{% endif %}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 var ZONES = {{ zones|tojson }};
 var FEEDER = {{ (feeder or "")|tojson }};
-var READONLY = {{ 'true' if readonly else 'false' }};
+var READONLY = false;
 var ZONE_COUNT = ZONES.length;
 
 var map = L.map("map", { scrollWheelZoom: true });
@@ -251,19 +222,13 @@ function zoneText(z) {
 }
 
 if (!READONLY) {
-  document.getElementById("copyShare").addEventListener("click", function (e) {
-    var b = e.currentTarget;
-    copyText(document.getElementById("shareUrl").value, function () { flash(b, "نُسخ الرابط"); });
-  });
-
   document.getElementById("copyAll").addEventListener("click", function () {
     var msg = document.getElementById("copyAllMsg");
     var head = "زونات العمل" + (FEEDER ? " — " + FEEDER : "") + "\n" +
                ZONES.length + " زون · " +
-               ZONES.reduce(function (s, z) { return s + z.count; }, 0) + " ملاحظة\n" +
-               "الخريطة: " + document.getElementById("shareUrl").value;
+               ZONES.reduce(function (s, z) { return s + z.count; }, 0) + " ملاحظة";
     copyText(head + "\n\n" + ZONES.map(zoneText).join("\n\n"), function () {
-      msg.textContent = "نُسخت كل الزونات مع رابط الخريطة.";
+      msg.textContent = "نُسخت مسارات كل الزونات.";
       setTimeout(function () { msg.textContent = ""; }, 4000);
     });
   });

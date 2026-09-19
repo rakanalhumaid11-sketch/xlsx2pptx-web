@@ -501,25 +501,7 @@ def zones_map(job_id):
                            iso_km=zones.ISOLATED_KM,
                            contractors=state.get("contractors") or [],
                            n_overrides=len(state.get("overrides") or {}),
-                           share_url=url_for("zones_share", job_id=job_id,
-                                             k=k, slack=slack, _external=True),
-                           max_zones=min(zones.MAX_ZONES, len(points)),
-                           readonly=False)
-
-
-@app.route("/job/<job_id>/zones/share")
-def zones_share(job_id):
-    """رابط للقراءة فقط يُرسل للفرق: نفس الخريطة بلا أدوات تعديل."""
-    state, k, slack = _zones_state(job_id)
-    zones.mark_isolation(state["points"])
-    built = _built_zones(state, k, slack)
-    return render_template("zones_map.html", job_id=job_id, k=k, slack=slack,
-                           zones=built, feeder=state.get("feeder", ""),
-                           skipped=state.get("skipped", 0),
-                           total=len(state["points"]), n_isolated=0,
-                           iso_km=zones.ISOLATED_KM, contractors=[],
-                           n_overrides=0, share_url="",
-                           max_zones=k, readonly=True)
+                           max_zones=min(zones.MAX_ZONES, len(points)))
 
 
 @app.route("/job/<job_id>/zones/settings", methods=["POST"])
@@ -572,19 +554,6 @@ def zones_move(job_id):
     state["slack"] = slack
     write_state(d, state)
     return redirect(url_for("zones_map", job_id=job_id, k=k, slack=slack))
-
-
-@app.route("/job/<job_id>/zones/csv")
-def zones_csv(job_id):
-    """جدول لاستيراده في «خرائطي» — يلوّن الزونات تلقائيًا حسب عمود الزون."""
-    state, k, slack = _zones_state(job_id)
-    zones.mark_isolation(state["points"])
-    built = _built_zones(state, k, slack)
-    feeder = state.get("feeder") or "المغذي"
-    return Response(
-        zones.build_csv(built), mimetype="text/csv",
-        headers={"Content-Disposition":
-                 "attachment; filename*=UTF-8''%D8%B2%D9%88%D9%86%D8%A7%D8%AA.csv"})
 
 
 @app.route("/job/<job_id>/zones/kml")

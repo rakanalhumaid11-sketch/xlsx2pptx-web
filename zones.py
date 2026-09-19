@@ -14,17 +14,38 @@ import math
 import random
 from typing import Any, Dict, List, Optional, Tuple
 
-# ألوان متباينة تكفي حتى 12 زونًا (مقروءة فوق خرائط الشوارع والأقمار الصناعية)
-ZONE_COLORS = [
-    "#E6194B", "#3CB44B", "#4363D8", "#F58231", "#911EB4", "#00A8B5",
-    "#F032E6", "#7F9C00", "#B15928", "#1F78B4", "#E7298A", "#666666",
+# ألوان الزونات: كل لون مقرون بأيقونة جاهزة من مكتبة قوقل نفسها.
+#
+# «خرائطي» (My Maps) تتجاهل وسم <color> الذي يلوّن أيقونة بيضاء — وهي الطريقة
+# التي تعمل في Google Earth — لكنها تحتفظ برابط الأيقونة كما هو. لذلك نعطي كل
+# زون أيقونة ملوّنة مسبقًا من روابط قوقل القياسية، فتظهر الزونات بألوانها فور
+# الاستيراد بلا تلوين يدوي. ولون الموقع مطابق للون الأيقونة حتى تتفق الخريطتان.
+ZONE_PALETTE = [
+    ("#DB4436", "red"),      # أحمر
+    ("#4186F0", "blu"),      # أزرق
+    ("#0F9D58", "grn"),      # أخضر
+    ("#F4B400", "ylw"),      # أصفر
+    ("#A23BC6", "purple"),   # بنفسجي
+    ("#FF9900", "orange"),   # برتقالي
+    ("#62AFF0", "ltblu"),    # أزرق فاتح
+    ("#E9548D", "pink"),     # وردي
 ]
 
-MAX_ZONES = 12
+ZONE_COLORS = [c for c, _ in ZONE_PALETTE]
+
+MAX_ZONES = 8
+
+# قاعدة روابط أيقونات قوقل القياسية (مستقرة منذ سنين وتعمل داخل خرائطي)
+ICON_BASE = "https://maps.google.com/mapfiles/kml/paddle/"
 
 
 def color_for(i: int) -> str:
-    return ZONE_COLORS[i % len(ZONE_COLORS)]
+    return ZONE_PALETTE[i % len(ZONE_PALETTE)][0]
+
+
+def icon_for(i: int) -> str:
+    """رابط أيقونة قوقل الملوّنة لهذا الزون."""
+    return f"{ICON_BASE}{ZONE_PALETTE[i % len(ZONE_PALETTE)][1]}-circle.png"
 
 
 def kml_color(hex_color: str, alpha: str = "ff") -> str:
@@ -371,6 +392,7 @@ def build_zones(points: List[Dict[str, Any]], k: int, slack: float = 0.0,
             "index": c + 1,
             "name": (names or {}).get(str(c + 1), "").strip(),
             "color": color_for(c),
+            "icon": icon_for(c),
             "count": len(members),
             "center": {"lat": lat_c, "lon": lon_c},
             "hull": [{"lat": y, "lon": x} for x, y in hull],
@@ -385,31 +407,6 @@ def build_zones(points: List[Dict[str, Any]], k: int, slack: float = 0.0,
 
 # --------------------------------------------------------------------- KML
 
-def build_csv(zones_list: List[Dict[str, Any]]) -> str:
-    """جدول مهيّأ لاستيراد «خرائطي» (Google My Maps): عمود الزون يُستخدم في
-    «تصنيف الأماكن حسب» فتلوّن الخريطة كل زون بلون تلقائيًا، وعمودا خط العرض
-    والطول لتحديد المواقع، ورقم الملاحظة عنوانًا للدبوس."""
-    import csv
-    import io as _io
-
-    buf = _io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(["رقم الملاحظة", "الزون", "المقاول", "الملاحظة", "المكتب",
-                "الترتيب", "خط العرض", "خط الطول", "رابط الصورة", "رابط الموقع"])
-    for z in zones_list:
-        label = f'زون {z["index"]}' + (f' — {z["name"]}' if z.get("name") else "")
-        for i, p in enumerate(z["points"], 1):
-            w.writerow([
-                p.get("note_id", ""), label, z.get("name", ""),
-                p.get("note", ""), p.get("office", ""), i,
-                f'{p["lat"]:.7f}', f'{p["lon"]:.7f}',
-                p.get("photo", ""),
-                f'https://www.google.com/maps?q={p["lat"]:.7f},{p["lon"]:.7f}',
-            ])
-    # BOM حتى يفتح الملف بالعربية الصحيحة في إكسل أيضًا
-    return "﻿" + buf.getvalue()
-
-
 def _esc(s: str) -> str:
     return (str(s).replace("&", "&amp;").replace("<", "&lt;")
             .replace(">", "&gt;").replace('"', "&quot;"))
@@ -423,9 +420,12 @@ def build_kml(zones: List[Dict[str, Any]], title: str) -> str:
 
     for z in zones:
         c = kml_color(z["color"])
+        # أيقونة ملوّنة جاهزة لكل زون بدل تلوين أيقونة بيضاء: «خرائطي» تتجاهل
+        # وسم <color> لكنها تحتفظ برابط الأيقونة، فتظهر الألوان فور الاستيراد
         out.append(f'<Style id="pin{z["index"]}">'
-                   f'<IconStyle><color>{c}</color><scale>1.0</scale>'
-                   f'<Icon><href>http://maps.google.com/mapfiles/kml/paddle/wht-blank.png</href></Icon>'
+                   f'<IconStyle><scale>1.1</scale>'
+                   f'<Icon><href>{z["icon"]}</href></Icon>'
+                   f'<hotSpot x="0.5" y="0" xunits="fraction" yunits="fraction"/>'
                    f'</IconStyle>'
                    f'<LabelStyle><scale>0.8</scale></LabelStyle></Style>')
         out.append(f'<Style id="area{z["index"]}">'

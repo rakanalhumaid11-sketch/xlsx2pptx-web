@@ -166,3 +166,13 @@ ul.plain { margin: 10px 0 0; padding-inline-start: 20px; line-height: 1.9; font-
 .stats li { padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 0.95rem; }
 .stats li:last-child { border-bottom: none; }
 .stats b { color: var(--primary); }
+
+/* --- صفحة ربط صور "بعد" --- */
+.missing-row .row { display: flex; align-items: center; gap: 14px; }
+.missing-row .grow { flex: 1; min-width: 0; }
+.missing-row .thumb {
+  width: 110px; height: 110px; object-fit: cover;
+  border-radius: 8px; border: 1px solid var(--border); flex: none; background: #f4f6fa;
+}
+.missing-row .note-text { font-size: 0.85rem; color: var(--muted); word-break: break-all; }
+.missing-row select { margin-top: 6px; }

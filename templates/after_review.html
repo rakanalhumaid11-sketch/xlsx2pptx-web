@@ -1,31 +1,35 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="card">
-  <h1>الملاحظات التي بدون صورة "بعد"</h1>
+  <h1>🔗 ربط الصور بالملاحظات</h1>
+  <p class="hint">
+    رُبطت <b>{{ auto_count }}</b> صورة تلقائيًا من أصل <b>{{ images|length }}</b>
+    باستخدام رقم الملاحظة في اسم الملف. راجع الاختيارات وعدّل ما تريد، واترك
+    «— تجاهل هذه الصورة —» لأي صورة لا تريد إدراجها.
+  </p>
 
-  {% if none_missing %}
-  <p>كل الملاحظات ضمن هذا النطاق عندها صورة "بعد" بالفعل — لا شيء لإضافته 🎉</p>
-  <a class="btn" href="{{ url_for('after_form') }}">رجوع</a>
-  {% else %}
-  <p class="hint">لكل ملاحظة: أدخل رابط الصورة، أو اختر ملف من جهازك. اتركها فاضية لتخطّيها الآن.</p>
-  <form action="{{ url_for('after_apply', job_id=job_id) }}" method="post" enctype="multipart/form-data">
-    {% for item in previews %}
+  <form method="post" action="{{ url_for('after_apply', job_id=job_id) }}">
+    {% for name in images %}
     <div class="missing-row">
-      <div class="note-text">سلايد رقم {{ item.slide_index + 1 }}: {{ item.text or "(بدون نص واضح)" }}</div>
-      <div class="row2">
-        <div>
-          <label>رابط الصورة</label>
-          <input type="text" name="url_{{ item.slide_index }}" placeholder="https://...">
-        </div>
-        <div>
-          <label>أو اختر ملف من جهازك</label>
-          <input type="file" name="file_{{ item.slide_index }}" accept="image/*">
+      <div class="row">
+        <img class="thumb" src="{{ url_for('after_thumb', job_id=job_id, name=name) }}" alt="">
+        <div class="grow">
+          <div class="note-text">{{ name }}</div>
+          <select name="img_{{ loop.index0 }}">
+            <option value="">— تجاهل هذه الصورة —</option>
+            {% for n in notes %}
+            <option value="{{ n.note_id }}"
+              {% if matches.get(name) == n.note_id %}selected{% endif %}>
+              {{ n.note_id }} — {{ n.desc[:60] }}{% if n.has_after %} (فيها صورة بعد مسبقًا){% endif %}
+            </option>
+            {% endfor %}
+          </select>
         </div>
       </div>
     </div>
     {% endfor %}
-    <button class="btn" type="submit">💾 حفظ الصور المُضافة</button>
+
+    <button class="btn" type="submit">✅ إدراج الصور في التقرير</button>
   </form>
-  {% endif %}
 </div>
 {% endblock %}

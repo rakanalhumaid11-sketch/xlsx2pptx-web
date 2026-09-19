@@ -1,8 +1,20 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="card">
-  <h1>✅ تم الحفظ</h1>
-  <p>تمت إضافة {{ applied }} صورة. إجمالي الملاحظات المعالجة الآن: <strong>{{ resolved_count }}</strong>.</p>
-  <a class="btn" href="{{ url_for('after_download', job_id=job_id) }}">⬇️ تحميل الملف المحدّث</a>
+  {% if error %}
+  <h1>❌ حدث خطأ</h1>
+  <div class="errors">{{ error }}</div>
+  <p><a class="back-link" href="{{ url_for('after_form') }}">← المحاولة من جديد</a></p>
+  {% else %}
+  <h1>✅ تم إدراج الصور</h1>
+  <ul class="stats">
+    <li>صور أُضيفت: <b>{{ result.added }}</b></li>
+    {% if result.replaced %}<li>صور استبدلت صورة سابقة: <b>{{ result.replaced }}</b></li>{% endif %}
+    {% if result.skipped %}<li>صور تعذّر إدراجها: <b>{{ result.skipped }}</b></li>{% endif %}
+  </ul>
+  <a class="btn" href="{{ url_for('after_download', job_id=job_id) }}">⬇️ تحميل التقرير</a>
+  <p class="hint">نزّل الملف الآن — الملفات تُحذف من الخادم تلقائيًا بعد ساعات قليلة.</p>
+  <p><a class="back-link" href="{{ url_for('index') }}">← الصفحة الرئيسية</a></p>
+  {% endif %}
 </div>
 {% endblock %}

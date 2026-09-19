@@ -1,26 +1,38 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="card">
-  <h1>إضافة صور "بعد المعالجة"</h1>
-  {% if errors %}
-  <div class="errors"><strong>تحقق من الآتي:</strong><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
-  {% endif %}
-  <form action="{{ url_for('after_start') }}" method="post" enctype="multipart/form-data">
-    <label>1) ملف البوربوينت الذي تم توليده سابقًا</label>
-    <input type="file" name="pptx_file" accept=".pptx" required>
+  <h1>🛠️ إضافة صور «بعد المعالجة»</h1>
+  <p class="hint">
+    ارفع التقرير الذي ولّدته من هنا، مع صور ما بعد الصيانة. الصورة التي يحمل
+    اسمها رقم الملاحظة تُوضع في شريحتها تلقائيًا، وما تبقّى تربطه بنفسك في
+    الخطوة التالية.
+  </p>
 
-    <div class="row2">
-      <div>
-        <label>2) رقم أول سلايد "ملاحظة" في الملف</label>
-        <input type="number" name="start_slide" min="1" required placeholder="مثلاً: 3">
-      </div>
-      <div>
-        <label>رقم آخر سلايد "ملاحظة" في الملف</label>
-        <input type="number" name="end_slide" min="1" required placeholder="مثلاً: 148">
-      </div>
-    </div>
-    <br>
-    <button class="btn" type="submit">متابعة ←</button>
+  {% if error %}<div class="errors">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ url_for('after_start') }}" enctype="multipart/form-data">
+    <label class="field">
+      <span class="field-label">ملف التقرير (‎.pptx‎)</span>
+      <input type="file" name="report_file" accept=".pptx" required>
+    </label>
+
+    <label class="field">
+      <span class="field-label">صور «بعد»</span>
+      <input type="file" name="photos" accept="image/*,.zip" multiple required>
+      <span class="hint">اختر عدة صور دفعة واحدة، أو ارفع ملفًا مضغوطًا (‎.zip‎) فيه الصور.</span>
+    </label>
+
+    <button class="btn" type="submit">📤 رفع ومطابقة</button>
   </form>
+</div>
+
+<div class="card">
+  <h2>نصيحة تختصر عليك الوقت</h2>
+  <p class="hint">
+    إذا سمّى الفني كل صورة برقم الملاحظة (مثل <code>277915.jpg</code>) ستُوزَّع
+    كل الصور تلقائيًا بلا أي عمل يدوي. أي أرقام أخرى في الاسم تُتجاهل، فاسم
+    مثل <code>IMG_277915_2.jpg</code> يعمل أيضًا.
+  </p>
+  <p><a class="back-link" href="{{ url_for('index') }}">← رجوع إلى توليد تقرير جديد</a></p>
 </div>
 {% endblock %}

@@ -24,6 +24,12 @@ function poll() {
       document.getElementById("errorBox").innerHTML = '<div class="errors">' + (data.error_message || "خطأ غير معروف") + '</div>';
       return;
     }
+    if (data.stage === "waiting") {
+      document.getElementById("statusTitle").textContent = "⏳ في الانتظار...";
+      document.getElementById("statusHint").textContent = "يوجد تقرير آخر قيد التوليد الآن. سيبدأ تقريرك تلقائيًا بعد ثوانٍ.";
+      setTimeout(poll, 1500);
+      return;
+    }
     var p = data.progress || {done: 0, total: 1};
     var pct = p.total > 0 ? Math.round((p.done / p.total) * 100) : 0;
     var bar = document.getElementById("bar");

@@ -68,6 +68,8 @@ def extract_points(records: List[Dict[str, str]]) -> Tuple[List[Dict[str, Any]],
             "note_id": rec.get("note_id", ""),
             "note": rec.get("note", ""),
             "office": rec.get("office", ""),
+            "photo": rec.get("photo1", ""),
+            "contractor": rec.get("contractor", ""),
             "lat": lat,
             "lon": lon,
         })
@@ -108,9 +110,38 @@ def _kmeans_pp_init(xy: List[Tuple[float, float]], k: int, rng: random.Random):
     return centers
 
 
+def resolve_capacities(n: int, k: int, slack: float,
+                       caps: Optional[Dict[int, int]] = None) -> List[int]:
+    """سعة كل زون. `caps` أعداد يحددها المستخدم لزونات بعينها (1-based)؛
+    الباقي يتقاسم المتبقي بالتساوي. لو نقص المجموع عن عدد الملاحظات نوزّع
+    الفرق على الزونات غير المحددة، ولو لم توجد رفعنا السعات بالتناسب."""
+    base = int(math.ceil(n / k * (1.0 + max(0.0, slack))))
+    out = [None] * k
+    if caps:
+        for z, v in caps.items():
+            if 1 <= z <= k and v and v > 0:
+                out[z - 1] = min(int(v), n)
+
+    fixed = sum(v for v in out if v is not None)
+    free = [i for i, v in enumerate(out) if v is None]
+    remaining = max(0, n - fixed)
+    if free:
+        share = int(math.ceil(remaining / len(free) * (1.0 + max(0.0, slack)))) if remaining else 1
+        for i in free:
+            out[i] = max(1, share)
+    elif fixed < n:
+        scale = n / fixed if fixed else 1
+        out = [max(1, int(math.ceil(v * scale))) for v in out]
+
+    if not caps:
+        out = [base] * k
+    return [min(n, max(1, v)) for v in out]
+
+
 def balanced_clusters(points: List[Dict[str, Any]], k: int,
                       iterations: int = 30, seed: int = 7,
-                      slack: float = 0.0) -> List[int]:
+                      slack: float = 0.0,
+                      caps: Optional[Dict[int, int]] = None) -> List[int]:
     """يرجع رقم الزون لكل نقطة (0..k-1).
 
     `slack` هو التباين المسموح في أحجام الزونات: صفر يعني تساويًا صارمًا في
@@ -128,7 +159,7 @@ def balanced_clusters(points: List[Dict[str, Any]], k: int,
     rng = random.Random(seed)
     centers = _kmeans_pp_init(xy, k, rng)
 
-    capacity = min(n, max(1, int(math.ceil(n / k * (1.0 + max(0.0, slack))))))
+    caps_list = resolve_capacities(n, k, slack, caps)
     assign = [0] * n
     for _ in range(iterations):
         pairs = []
@@ -142,7 +173,7 @@ def balanced_clusters(points: List[Dict[str, Any]], k: int,
         load = [0] * k
         placed = 0
         for _d, i, c in pairs:
-            if new_assign[i] != -1 or load[c] >= capacity:
+            if new_assign[i] != -1 or load[c] >= caps_list[c]:
                 continue
             new_assign[i] = c
             load[c] += 1
@@ -307,9 +338,11 @@ def mark_isolation(points: List[Dict[str, Any]]) -> int:
 
 
 def build_zones(points: List[Dict[str, Any]], k: int, slack: float = 0.0,
-                overrides: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
-    """يجمع نتيجة التقسيم: لكل زون نقاطه ولونه ومركزه وحدوده وقطره ومساره."""
-    assign = balanced_clusters(points, k, slack=slack)
+                overrides: Optional[Dict[str, int]] = None,
+                caps: Optional[Dict[int, int]] = None,
+                names: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
+    """يجمع نتيجة التقسيم: لكل زون نقاطه ولونه واسم مقاوله وحدوده ومساره."""
+    assign = balanced_clusters(points, k, slack=slack, caps=caps)
 
     # نقل يدوي من المستخدم: يغلب على نتيجة الخوارزمية
     if overrides:
@@ -336,6 +369,7 @@ def build_zones(points: List[Dict[str, Any]], k: int, slack: float = 0.0,
         ordered, route_km = order_route(members)
         zones.append({
             "index": c + 1,
+            "name": (names or {}).get(str(c + 1), "").strip(),
             "color": color_for(c),
             "count": len(members),
             "center": {"lat": lat_c, "lon": lon_c},
@@ -374,7 +408,10 @@ def build_kml(zones: List[Dict[str, Any]], title: str) -> str:
                    f'<PolyStyle><color>{kml_color(z["color"], "33")}</color></PolyStyle></Style>')
 
     for z in zones:
-        out.append(f'<Folder><name>زون {z["index"]} — {z["count"]} ملاحظة</name>')
+        title = f'زون {z["index"]}'
+        if z.get("name"):
+            title += f' — {_esc(z["name"])}'
+        out.append(f'<Folder><name>{title} ({z["count"]} ملاحظة)</name>')
         if len(z["hull"]) >= 3:
             ring = " ".join(f'{p["lon"]},{p["lat"]},0' for p in z["hull"])
             first = z["hull"][0]
@@ -384,11 +421,19 @@ def build_kml(zones: List[Dict[str, Any]], title: str) -> str:
                        f'<Polygon><outerBoundaryIs><LinearRing>'
                        f'<coordinates>{ring}</coordinates>'
                        f'</LinearRing></outerBoundaryIs></Polygon></Placemark>')
+        zone_label = f'زون {z["index"]}' + (f' — {_esc(z["name"])}' if z.get("name") else "")
         for order_no, p in enumerate(z["points"], 1):
-            desc = (f'<![CDATA[رقم الملاحظة: {_esc(p["note_id"])}<br>'
+            # صورة "قبل" داخل الوصف: يفتحها الفني من الخريطة فيرى الزاوية التي
+            # صُوّرت منها الملاحظة قبل وصوله للموقع
+            img = ""
+            photo = (p.get("photo") or "").strip()
+            if photo.startswith("http"):
+                img = (f'<br><a href="{_esc(photo)}">'
+                       f'<img src="{_esc(photo)}" width="260"></a>')
+            desc = (f'<![CDATA[<b>ملاحظة {_esc(p["note_id"])}</b><br>'
                     f'{_esc(p["note"])}<br>المكتب: {_esc(p["office"])}<br>'
-                    f'زون {z["index"]} · الترتيب {order_no}]]>')
-            out.append(f'<Placemark><name>{order_no}. {_esc(p["note_id"] or p["note"][:30])}</name>'
+                    f'{zone_label} · الترتيب {order_no}{img}]]>')
+            out.append(f'<Placemark><name>{_esc(p["note_id"]) or str(order_no)}</name>'
                        f'<description>{desc}</description>'
                        f'<styleUrl>#pin{z["index"]}</styleUrl>'
                        f'<Point><coordinates>{p["lon"]},{p["lat"]},0</coordinates></Point></Placemark>')

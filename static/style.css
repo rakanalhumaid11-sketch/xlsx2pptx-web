@@ -450,3 +450,53 @@ select { cursor: pointer; }
 .zone-legend .zmeta { font-size: 12px; color: var(--muted); margin-inline-start: auto; }
 
 input[type="number"] { -moz-appearance: textfield; }
+
+/* --------------------------------------------- دبابيس مرقّمة ومشاركة الزونات */
+
+.pin { background: none; border: none; }
+.pin .pin-dot {
+  display: block; width: 14px; height: 14px;
+  border: 2px solid #0F1620; border-radius: 50%;
+}
+.pin .pin-num {
+  display: none;
+  position: absolute; top: -3px; inset-inline-start: 18px;
+  padding: 1px 5px;
+  font-family: "Readex Pro", sans-serif; font-size: 10px; font-weight: 500;
+  color: #0F1620; background: rgba(255,255,255,.88);
+  border-radius: 4px; white-space: nowrap;
+  direction: ltr;
+}
+.show-nums .pin .pin-num { display: block; }
+.pin:hover .pin-num { display: block; z-index: 500; }
+
+.pin-photo {
+  display: block; width: 100%; max-width: 240px;
+  margin: 8px 0; border-radius: 6px;
+}
+.leaflet-popup-content { max-width: 250px; }
+
+.share-box {
+  padding: 16px;
+  margin-bottom: 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.share-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.share-row input[type="text"] {
+  flex: 1 1 320px; min-height: 46px;
+  font-size: 13px; color: var(--accent-soft); background: #0F1822;
+}
+.share-row .btn { margin-top: 0; min-height: 46px; padding: 0 20px; font-size: 14px; }
+.share-box .hint { margin-top: 10px; }
+.share-box .hint#copyAllMsg { margin-top: 0; color: var(--ok); }
+
+.zc-fields { display: flex; gap: 8px; margin-top: 12px; }
+.zc-fields input[type="text"] { flex: 1 1 auto; min-height: 42px; font-size: 14px; }
+.zc-fields input[type="number"] {
+  flex: none; width: 82px; min-height: 42px; padding: 0 10px;
+  font-family: inherit; font-size: 14px; font-weight: 300;
+  color: var(--text); background: var(--surface);
+  border: 1px solid var(--border-2); border-radius: 10px;
+}

@@ -443,12 +443,20 @@ def zones_start():
         return render_template("zones_new.html", max_zones=zones.MAX_ZONES,
                                error="لا توجد إحداثيات صالحة في هذا الملف."), 400
 
+    seen, contractors = set(), []
+    for p in points:
+        c = (p.get("contractor") or "").strip()
+        if c and c not in seen:
+            seen.add(c)
+            contractors.append(c)
+
     write_state(d, {
         "job_id": job_id,
         "kind": "zones",
         "points": points,
         "skipped": skipped,
         "feeder": builder.feeder_code(records),
+        "contractors": contractors[:20],
         "zones": k,
         "created_at": time.time(),
     })
@@ -473,20 +481,69 @@ def _zones_state(job_id):
     return state, k, slack
 
 
+def _built_zones(state, k, slack):
+    caps = {int(z): int(v) for z, v in (state.get("caps") or {}).items() if int(v) > 0}
+    return zones.build_zones(state["points"], k, slack=slack,
+                             overrides=state.get("overrides") or {},
+                             caps=caps, names=state.get("names") or {})
+
+
 @app.route("/job/<job_id>/zones")
 def zones_map(job_id):
     state, k, slack = _zones_state(job_id)
     points = state["points"]
     n_isolated = zones.mark_isolation(points)
-    built = zones.build_zones(points, k, slack=slack,
-                              overrides=state.get("overrides") or {})
+    built = _built_zones(state, k, slack)
     return render_template("zones_map.html", job_id=job_id, k=k, slack=slack,
                            zones=built, feeder=state.get("feeder", ""),
                            skipped=state.get("skipped", 0),
                            total=len(points), n_isolated=n_isolated,
                            iso_km=zones.ISOLATED_KM,
+                           contractors=state.get("contractors") or [],
                            n_overrides=len(state.get("overrides") or {}),
-                           max_zones=min(zones.MAX_ZONES, len(points)))
+                           share_url=url_for("zones_share", job_id=job_id,
+                                             k=k, slack=slack, _external=True),
+                           max_zones=min(zones.MAX_ZONES, len(points)),
+                           readonly=False)
+
+
+@app.route("/job/<job_id>/zones/share")
+def zones_share(job_id):
+    """رابط للقراءة فقط يُرسل للفرق: نفس الخريطة بلا أدوات تعديل."""
+    state, k, slack = _zones_state(job_id)
+    zones.mark_isolation(state["points"])
+    built = _built_zones(state, k, slack)
+    return render_template("zones_map.html", job_id=job_id, k=k, slack=slack,
+                           zones=built, feeder=state.get("feeder", ""),
+                           skipped=state.get("skipped", 0),
+                           total=len(state["points"]), n_isolated=0,
+                           iso_km=zones.ISOLATED_KM, contractors=[],
+                           n_overrides=0, share_url="",
+                           max_zones=k, readonly=True)
+
+
+@app.route("/job/<job_id>/zones/settings", methods=["POST"])
+def zones_settings(job_id):
+    """حفظ اسم المقاول وعدد الملاحظات المطلوب لكل زون."""
+    d = job_dir(job_id)
+    state, k, slack = _zones_state(job_id)
+    names, caps = {}, {}
+    for i in range(1, k + 1):
+        nm = (request.form.get(f"name_{i}") or "").strip()
+        if nm:
+            names[str(i)] = nm[:40]
+        try:
+            cap = int(request.form.get(f"cap_{i}") or 0)
+        except ValueError:
+            cap = 0
+        if cap > 0:
+            caps[str(i)] = cap
+    state["names"] = names
+    state["caps"] = caps
+    state["zones"] = k
+    state["slack"] = slack
+    write_state(d, state)
+    return redirect(url_for("zones_map", job_id=job_id, k=k, slack=slack))
 
 
 @app.route("/job/<job_id>/zones/move", methods=["POST"])
@@ -521,8 +578,7 @@ def zones_move(job_id):
 def zones_kml(job_id):
     state, k, slack = _zones_state(job_id)
     zones.mark_isolation(state["points"])
-    built = zones.build_zones(state["points"], k, slack=slack,
-                              overrides=state.get("overrides") or {})
+    built = _built_zones(state, k, slack)
     feeder = state.get("feeder") or "المغذي"
     kml = zones.build_kml(built, f"زونات {feeder}")
     return Response(

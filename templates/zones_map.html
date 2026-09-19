@@ -6,69 +6,209 @@
 
   <div class="page-head">
     <h1>زونات العمل{% if feeder %} — {{ feeder }}{% endif %}</h1>
-    <p>{{ total }} ملاحظة موزّعة على {{ zones|length }} زون{% if skipped %} · {{ skipped }} بلا إحداثيات{% endif %}</p>
+    <p>{{ total }} ملاحظة على {{ zones|length }} زون{% if skipped %} · {{ skipped }} بلا إحداثيات{% endif %}{% if n_overrides %} · {{ n_overrides }} منقولة يدويًا{% endif %}</p>
   </div>
 
   <form class="zone-bar" method="get" action="{{ url_for('zones_map', job_id=job_id) }}">
-    <label class="field-label" for="k">عدد الزونات</label>
-    <input id="k" type="number" name="k" value="{{ k }}" min="1" max="{{ max_zones }}" inputmode="numeric">
+    <span class="zb-item">
+      <label class="field-label" for="k">عدد الزونات</label>
+      <input id="k" type="number" name="k" value="{{ k }}" min="1" max="{{ max_zones }}" inputmode="numeric">
+    </span>
+    <span class="zb-item">
+      <label class="field-label" for="slack">تقارب المسافات</label>
+      <select id="slack" name="slack">
+        <option value="0" {% if slack < 0.05 %}selected{% endif %}>أعداد متساوية تمامًا</option>
+        <option value="0.15" {% if 0.05 <= slack < 0.22 %}selected{% endif %}>موازنة مع تقارب (±١٥٪)</option>
+        <option value="0.3" {% if 0.22 <= slack < 0.4 %}selected{% endif %}>أولوية للتقارب (±٣٠٪)</option>
+        <option value="1" {% if slack >= 0.4 %}selected{% endif %}>أقصر المسافات مهما تفاوتت الأعداد</option>
+      </select>
+    </span>
     <button class="btn btn-ghost" type="submit">أعد التقسيم</button>
-    <a class="btn" href="{{ url_for('zones_kml', job_id=job_id, k=k) }}">تحميل ملف قوقل مابس</a>
+    <a class="btn" href="{{ url_for('zones_kml', job_id=job_id, k=k, slack=slack) }}">تحميل ملف قوقل مابس</a>
   </form>
+
+  <div class="copy-all">
+    <button type="button" class="btn btn-ghost" id="copyAll">نسخ روابط كل الزونات</button>
+    <span class="hint" id="copyAllMsg"></span>
+  </div>
+
+  {% if n_isolated %}
+  <p class="summary-line">
+    <b>{{ n_isolated }}</b> ملاحظة معزولة (تبعد أكثر من {{ iso_km }} كم عن أقرب ملاحظة) — هي سبب امتداد الزون،
+    وتظهر على الخريطة بحلقة بيضاء. اضغط عليها لنقلها إلى زون آخر.
+  </p>
+  {% endif %}
 
   <div id="map"></div>
 
-  <ul class="zone-legend">
+  <div class="zone-cards">
     {% for z in zones %}
-    <li>
-      <span class="swatch" style="background: {{ z.color }}"></span>
-      <span class="zname">زون {{ z.index }}</span>
-      <span class="zmeta">{{ z.count }} ملاحظة · امتداد {{ z.span_km }} كم</span>
-    </li>
+    <div class="zone-card">
+      <div class="zc-head">
+        <span class="swatch" style="background: {{ z.color }}"></span>
+        <b>زون {{ z.index }}</b>
+        <span class="zmeta">{{ z.count }} ملاحظة · مسار {{ z.route_km }} كم · امتداد {{ z.span_km }} كم</span>
+      </div>
+      <div class="zc-links">
+        {% for lnk in z.links %}
+        <a class="chip" href="{{ lnk.url }}" target="_blank" rel="noopener">مسار {{ lnk.index }} ({{ lnk.stops }})</a>
+        <button type="button" class="chip copy" data-url="{{ lnk.url }}">نسخ</button>
+        {% endfor %}
+      </div>
+      <button type="button" class="chip copy-zone" data-zone="{{ z.index }}">نسخ الزون كاملًا</button>
+    </div>
     {% endfor %}
-  </ul>
+  </div>
+
+  <form method="post" action="{{ url_for('zones_move', job_id=job_id) }}" class="reset-form">
+    <input type="hidden" name="k" value="{{ k }}">
+    <input type="hidden" name="slack" value="{{ slack }}">
+    <input type="hidden" name="reset" value="1">
+    {% if n_overrides %}<button class="btn btn-ghost" type="submit">إلغاء كل النقل اليدوي</button>{% endif %}
+  </form>
 
   <p class="hint">
-    لفتح الزونات في خرائط قوقل: نزّل الملف، ثم افتح <span dir="ltr">google.com/mymaps</span>،
-    أنشئ خريطة جديدة واضغط «استيراد» واختر الملف.
+    روابط المسار تفتح خرائط قوقل مباشرة بالترتيب الأقصر للقيادة — انسخها وأرسلها للفرق.
+    قُسّمت إلى مقاطع لأن الرابط الواحد لا يحتمل محطات كثيرة على الجوال.
+    ولاستيراد كل الزونات بألوانها: نزّل الملف وافتح <span dir="ltr">google.com/mymaps</span> ← استيراد.
   </p>
 
 </div>
 
+<form id="moveForm" method="post" action="{{ url_for('zones_move', job_id=job_id) }}" hidden>
+  <input type="hidden" name="k" value="{{ k }}">
+  <input type="hidden" name="slack" value="{{ slack }}">
+  <input type="hidden" name="note_id" id="mvNote">
+  <input type="hidden" name="zone" id="mvZone">
+</form>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 var ZONES = {{ zones|tojson }};
+var ZONE_COUNT = {{ zones|length }};
 
 var map = L.map("map", { scrollWheelZoom: true });
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19,
-  attribution: "&copy; OpenStreetMap"
+  maxZoom: 19, attribution: "&copy; OpenStreetMap"
 }).addTo(map);
 
 var bounds = [];
 
+function moveOptions(current, noteId) {
+  var out = '<select onchange="moveNote(\'' + noteId + '\', this.value)">';
+  out += '<option value="">انقل إلى زون…</option>';
+  for (var i = 1; i <= ZONE_COUNT; i++) {
+    if (i === current) continue;
+    out += '<option value="' + i + '">زون ' + i + '</option>';
+  }
+  out += '<option value="0">إرجاع للتقسيم التلقائي</option>';
+  return out + "</select>";
+}
+
+window.moveNote = function (noteId, zone) {
+  if (zone === "") return;
+  document.getElementById("mvNote").value = noteId;
+  document.getElementById("mvZone").value = zone;
+  document.getElementById("moveForm").submit();
+};
+
 ZONES.forEach(function (z) {
   if (z.hull && z.hull.length >= 3) {
     L.polygon(z.hull.map(function (p) { return [p.lat, p.lon]; }), {
-      color: z.color, weight: 2, fillColor: z.color, fillOpacity: 0.12
+      color: z.color, weight: 2, fillColor: z.color, fillOpacity: 0.10
     }).addTo(map);
   }
-  z.points.forEach(function (p) {
+  // خط المسار بترتيب القيادة
+  if (z.points.length > 1) {
+    L.polyline(z.points.map(function (p) { return [p.lat, p.lon]; }), {
+      color: z.color, weight: 2, opacity: 0.55, dashArray: "5,6"
+    }).addTo(map);
+  }
+  z.points.forEach(function (p, i) {
     bounds.push([p.lat, p.lon]);
     L.circleMarker([p.lat, p.lon], {
-      radius: 6, color: "#0F1620", weight: 1,
+      radius: p.isolated ? 8 : 6,
+      color: p.isolated ? "#FFFFFF" : "#0F1620",
+      weight: p.isolated ? 3 : 1,
       fillColor: z.color, fillOpacity: 0.95
     }).addTo(map).bindPopup(
-      "<b>زون " + z.index + "</b><br>" +
-      (p.note_id ? "رقم الملاحظة: " + p.note_id + "<br>" : "") +
+      "<b>زون " + z.index + " · الترتيب " + (i + 1) + "</b><br>" +
+      (p.note_id ? "ملاحظة " + p.note_id + "<br>" : "") +
       (p.note || "") + "<br>" +
+      (p.isolated ? "<b>معزولة</b> — أقرب ملاحظة على بعد " + p.iso_km + " كم<br>" : "") +
       '<a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' +
-      p.lat + "," + p.lon + '">فتح في خرائط قوقل</a>'
+      p.lat + "," + p.lon + '">فتح في خرائط قوقل</a><br>' +
+      moveOptions(z.index, p.note_id)
     );
   });
 });
 
 if (bounds.length) { map.fitBounds(bounds, { padding: [30, 30] }); }
 else { map.setView([24.7, 46.7], 6); }
+
+var FEEDER = {{ (feeder or "")|tojson }};
+
+function copyText(text, done) {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done, function () { fallback(text, done); });
+  } else { fallback(text, done); }
+}
+
+function fallback(text, done) {
+  var t = document.createElement("textarea");
+  t.value = text;
+  t.style.position = "fixed";
+  t.style.opacity = "0";
+  document.body.appendChild(t);
+  t.select();
+  try { document.execCommand("copy"); } catch (e) {}
+  document.body.removeChild(t);
+  done();
+}
+
+function zoneText(z) {
+  var lines = ["زون " + z.index + " — " + z.count + " ملاحظة · مسار " + z.route_km + " كم"];
+  z.links.forEach(function (l) {
+    lines.push("مسار " + l.index + " (" + l.stops + " مواقع): " + l.url);
+  });
+  return lines.join("\n");
+}
+
+function allText() {
+  var head = "زونات العمل" + (FEEDER ? " — " + FEEDER : "") +
+             "\n" + ZONES.length + " زون · " +
+             ZONES.reduce(function (s, z) { return s + z.count; }, 0) + " ملاحظة";
+  return head + "\n\n" + ZONES.map(zoneText).join("\n\n");
+}
+
+function flash(el, label) {
+  var old = el.textContent;
+  el.textContent = label;
+  setTimeout(function () { el.textContent = old; }, 1800);
+}
+
+document.querySelectorAll(".chip.copy").forEach(function (b) {
+  b.addEventListener("click", function () {
+    copyText(b.getAttribute("data-url"), function () { flash(b, "نُسخ"); });
+  });
+});
+
+document.querySelectorAll(".chip.copy-zone").forEach(function (b) {
+  b.addEventListener("click", function () {
+    var idx = parseInt(b.getAttribute("data-zone"), 10);
+    var z = ZONES.filter(function (x) { return x.index === idx; })[0];
+    if (!z) return;
+    copyText(zoneText(z), function () { flash(b, "نُسخ الزون"); });
+  });
+});
+
+document.getElementById("copyAll").addEventListener("click", function () {
+  var msg = document.getElementById("copyAllMsg");
+  copyText(allText(), function () {
+    var n = ZONES.reduce(function (s, z) { return s + z.links.length; }, 0);
+    msg.textContent = "نُسخت " + n + " رابطًا لـ " + ZONES.length + " زون — الصقها في الواتساب.";
+    setTimeout(function () { msg.textContent = ""; }, 4000);
+  });
+});
 </script>
 {% endblock %}

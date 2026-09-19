@@ -461,28 +461,68 @@ def _zones_state(job_id):
     if state.get("kind") != "zones":
         abort(404)
     try:
-        k = int(request.args.get("k") or state.get("zones") or 4)
+        k = int(request.values.get("k") or state.get("zones") or 4)
     except ValueError:
         k = 4
     k = max(1, min(k, zones.MAX_ZONES, len(state["points"])))
-    return state, k
+    try:
+        slack = float(request.values.get("slack", state.get("slack", 0)))
+    except ValueError:
+        slack = 0.0
+    slack = max(0.0, min(1.0, slack))
+    return state, k, slack
 
 
 @app.route("/job/<job_id>/zones")
 def zones_map(job_id):
-    state, k = _zones_state(job_id)
-    built = zones.build_zones(state["points"], k)
-    return render_template("zones_map.html", job_id=job_id, k=k,
+    state, k, slack = _zones_state(job_id)
+    points = state["points"]
+    n_isolated = zones.mark_isolation(points)
+    built = zones.build_zones(points, k, slack=slack,
+                              overrides=state.get("overrides") or {})
+    return render_template("zones_map.html", job_id=job_id, k=k, slack=slack,
                            zones=built, feeder=state.get("feeder", ""),
                            skipped=state.get("skipped", 0),
-                           total=len(state["points"]),
-                           max_zones=min(zones.MAX_ZONES, len(state["points"])))
+                           total=len(points), n_isolated=n_isolated,
+                           iso_km=zones.ISOLATED_KM,
+                           n_overrides=len(state.get("overrides") or {}),
+                           max_zones=min(zones.MAX_ZONES, len(points)))
+
+
+@app.route("/job/<job_id>/zones/move", methods=["POST"])
+def zones_move(job_id):
+    """نقل ملاحظة يدويًا إلى زون آخر — يُحفظ ويغلب على نتيجة الخوارزمية."""
+    d = job_dir(job_id)
+    state, k, slack = _zones_state(job_id)
+    note_id = (request.form.get("note_id") or "").strip()
+    reset = request.form.get("reset")
+
+    overrides = state.get("overrides") or {}
+    if reset:
+        overrides = {}
+    elif note_id:
+        try:
+            z = int(request.form.get("zone") or 0)
+        except ValueError:
+            z = 0
+        if z <= 0:
+            overrides.pop(note_id, None)      # إرجاعها لتقدير الخوارزمية
+        else:
+            overrides[note_id] = min(z, k)
+
+    state["overrides"] = overrides
+    state["zones"] = k
+    state["slack"] = slack
+    write_state(d, state)
+    return redirect(url_for("zones_map", job_id=job_id, k=k, slack=slack))
 
 
 @app.route("/job/<job_id>/zones/kml")
 def zones_kml(job_id):
-    state, k = _zones_state(job_id)
-    built = zones.build_zones(state["points"], k)
+    state, k, slack = _zones_state(job_id)
+    zones.mark_isolation(state["points"])
+    built = zones.build_zones(state["points"], k, slack=slack,
+                              overrides=state.get("overrides") or {})
     feeder = state.get("feeder") or "المغذي"
     kml = zones.build_kml(built, f"زونات {feeder}")
     return Response(

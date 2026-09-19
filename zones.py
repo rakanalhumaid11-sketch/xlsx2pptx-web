@@ -109,8 +109,14 @@ def _kmeans_pp_init(xy: List[Tuple[float, float]], k: int, rng: random.Random):
 
 
 def balanced_clusters(points: List[Dict[str, Any]], k: int,
-                      iterations: int = 30, seed: int = 7) -> List[int]:
-    """يرجع رقم الزون لكل نقطة (0..k-1) مع أحجام متقاربة."""
+                      iterations: int = 30, seed: int = 7,
+                      slack: float = 0.0) -> List[int]:
+    """يرجع رقم الزون لكل نقطة (0..k-1).
+
+    `slack` هو التباين المسموح في أحجام الزونات: صفر يعني تساويًا صارمًا في
+    العدد، وهو ما يجبر النقاط البعيدة على الانضمام لزون بعيد عنها لمجرد ملء
+    الحصة فيتمدد الزون جغرافيًا. رفع التباين يسمح لكل نقطة بالذهاب لأقرب
+    مركز فتتقلّص المسافات داخل الزون على حساب تفاوت الأعداد."""
     n = len(points)
     if n == 0:
         return []
@@ -122,7 +128,7 @@ def balanced_clusters(points: List[Dict[str, Any]], k: int,
     rng = random.Random(seed)
     centers = _kmeans_pp_init(xy, k, rng)
 
-    capacity = -(-n // k)          # سقف متساوٍ (تقريب لأعلى)
+    capacity = min(n, max(1, int(math.ceil(n / k * (1.0 + max(0.0, slack))))))
     assign = [0] * n
     for _ in range(iterations):
         pairs = []
@@ -197,9 +203,122 @@ def haversine_km(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     return 2 * 6371.0 * math.asin(min(1.0, math.sqrt(h)))
 
 
-def build_zones(points: List[Dict[str, Any]], k: int) -> List[Dict[str, Any]]:
-    """يجمع نتيجة التقسيم: لكل زون نقاطه ولونه ومركزه وحدوده وقطره."""
-    assign = balanced_clusters(points, k)
+def order_route(members: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], float]:
+    """يرتّب مواقع الزون كمسار قيادة قصير: نبدأ من الأقرب للشمال الغربي ثم
+    الأقرب فالأقرب، ثم نحسّن الترتيب بتبديلات 2-opt. يرجع (الترتيب، الطول كم).
+
+    الهدف تقليل زمن التنقل داخل الزون، لا مجرد تجميع النقاط."""
+    n = len(members)
+    if n <= 2:
+        d = haversine_km((members[0]["lat"], members[0]["lon"]),
+                         (members[-1]["lat"], members[-1]["lon"])) if n == 2 else 0.0
+        return list(members), round(d, 1)
+
+    pts = [(m["lat"], m["lon"]) for m in members]
+
+    def dist(i, j):
+        return haversine_km(pts[i], pts[j])
+
+    start = max(range(n), key=lambda i: pts[i][0] - pts[i][1])   # أقصى الشمال الغربي
+    order = [start]
+    unused = set(range(n)) - {start}
+    while unused:
+        last = order[-1]
+        nxt = min(unused, key=lambda j: dist(last, j))
+        order.append(nxt)
+        unused.discard(nxt)
+
+    # 2-opt: عكس مقاطع من المسار متى قصّر الطول الكلي
+    improved = True
+    rounds = 0
+    while improved and rounds < 12:
+        improved = False
+        rounds += 1
+        for i in range(n - 2):
+            for j in range(i + 2, n):
+                a, b = order[i], order[i + 1]
+                c, d2 = order[j], order[(j + 1) % n]
+                if (j + 1) % n == i:
+                    continue
+                before = dist(a, b) + dist(c, d2)
+                after = dist(a, c) + dist(b, d2)
+                if after + 1e-9 < before:
+                    order[i + 1:j + 1] = reversed(order[i + 1:j + 1])
+                    improved = True
+
+    total = sum(dist(order[i], order[i + 1]) for i in range(n - 1))
+    return [members[i] for i in order], round(total, 1)
+
+
+def route_links(ordered: List[Dict[str, Any]], per_leg: int = 10) -> List[Dict[str, Any]]:
+    """روابط خرائط قوقل للمسار. تُقسَّم إلى مقاطع لأن الرابط الواحد لا يحتمل
+    محطات كثيرة (الصيغة الرسمية تسمح بثلاث محطات فقط على الجوال)، وكل مقطع
+    يبدأ من آخر موقع في سابقه فلا ينقطع المسار."""
+    links = []
+    i = 0
+    n = len(ordered)
+    while i < n:
+        leg = ordered[i:i + per_leg]
+        if i > 0:
+            leg = [ordered[i - 1]] + leg          # وصل المقطع بسابقه
+        path = "/".join(f'{p["lat"]:.6f},{p["lon"]:.6f}' for p in leg)
+        links.append({
+            "url": "https://www.google.com/maps/dir/" + path,
+            "stops": len(leg),
+            "index": len(links) + 1,
+        })
+        i += per_leg
+    return links
+
+
+ISOLATED_KM = 3.0
+
+
+def mark_isolation(points: List[Dict[str, Any]]) -> int:
+    """يحسب لكل ملاحظة بعدها عن أقرب ملاحظة أخرى، ويميّز المعزولة منها.
+
+    الملاحظة المعزولة هي ما يمدّد الزون جغرافيًا مهما حسّنّا التقسيم: لا
+    خوارزمية تستطيع تقريب نقطة تبعد عشرة كيلومترات عن الجميع، والمفيد أن
+    يراها المخطّط ليقرر بشأنها."""
+    n = len(points)
+    if n < 2:
+        for p in points:
+            p["iso_km"] = 0.0
+            p["isolated"] = False
+        return 0
+    xy = _project(points)
+    count = 0
+    for i, p in enumerate(points):
+        best = None
+        xi, yi = xy[i]
+        for j in range(n):
+            if j == i:
+                continue
+            dx, dy = xi - xy[j][0], yi - xy[j][1]
+            d2 = dx * dx + dy * dy
+            if best is None or d2 < best:
+                best = d2
+        km = round((best ** 0.5) / 1000.0, 2) if best else 0.0
+        p["iso_km"] = km
+        p["isolated"] = km >= ISOLATED_KM
+        if p["isolated"]:
+            count += 1
+    return count
+
+
+def build_zones(points: List[Dict[str, Any]], k: int, slack: float = 0.0,
+                overrides: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
+    """يجمع نتيجة التقسيم: لكل زون نقاطه ولونه ومركزه وحدوده وقطره ومساره."""
+    assign = balanced_clusters(points, k, slack=slack)
+
+    # نقل يدوي من المستخدم: يغلب على نتيجة الخوارزمية
+    if overrides:
+        k_max = max(1, min(k, len(points), MAX_ZONES))
+        for i, p in enumerate(points):
+            z = overrides.get(str(p.get("note_id", "")))
+            if z is not None and 1 <= z <= k_max:
+                assign[i] = z - 1
+
     k_eff = (max(assign) + 1) if assign else 0
     zones = []
     for c in range(k_eff):
@@ -214,6 +333,7 @@ def build_zones(points: List[Dict[str, Any]], k: int) -> List[Dict[str, Any]]:
             for j in range(i + 1, len(hull)):
                 span = max(span, haversine_km((hull[i][1], hull[i][0]),
                                               (hull[j][1], hull[j][0])))
+        ordered, route_km = order_route(members)
         zones.append({
             "index": c + 1,
             "color": color_for(c),
@@ -221,7 +341,9 @@ def build_zones(points: List[Dict[str, Any]], k: int) -> List[Dict[str, Any]]:
             "center": {"lat": lat_c, "lon": lon_c},
             "hull": [{"lat": y, "lon": x} for x, y in hull],
             "span_km": round(span, 1),
-            "points": members,
+            "route_km": route_km,
+            "links": route_links(ordered),
+            "points": ordered,
         })
     zones.sort(key=lambda z: z["index"])
     return zones
@@ -262,11 +384,11 @@ def build_kml(zones: List[Dict[str, Any]], title: str) -> str:
                        f'<Polygon><outerBoundaryIs><LinearRing>'
                        f'<coordinates>{ring}</coordinates>'
                        f'</LinearRing></outerBoundaryIs></Polygon></Placemark>')
-        for p in z["points"]:
+        for order_no, p in enumerate(z["points"], 1):
             desc = (f'<![CDATA[رقم الملاحظة: {_esc(p["note_id"])}<br>'
                     f'{_esc(p["note"])}<br>المكتب: {_esc(p["office"])}<br>'
-                    f'زون {z["index"]}]]>')
-            out.append(f'<Placemark><name>{_esc(p["note_id"] or p["note"][:30])}</name>'
+                    f'زون {z["index"]} · الترتيب {order_no}]]>')
+            out.append(f'<Placemark><name>{order_no}. {_esc(p["note_id"] or p["note"][:30])}</name>'
                        f'<description>{desc}</description>'
                        f'<styleUrl>#pin{z["index"]}</styleUrl>'
                        f'<Point><coordinates>{p["lon"]},{p["lat"]},0</coordinates></Point></Placemark>')

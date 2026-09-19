@@ -1,35 +1,37 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card">
-  <h1>🔗 ربط الصور بالملاحظات</h1>
-  <p class="hint">
-    رُبطت <b>{{ auto_count }}</b> صورة تلقائيًا من أصل <b>{{ images|length }}</b>
-    باستخدام رقم الملاحظة في اسم الملف. راجع الاختيارات وعدّل ما تريد، واترك
-    «— تجاهل هذه الصورة —» لأي صورة لا تريد إدراجها.
+<div class="wrap-wide">
+
+  <div class="page-head">
+    <h1>ربط الصور بالملاحظات</h1>
+    <p>راجع الاختيارات قبل الإدراج.</p>
+  </div>
+
+  <p class="summary-line">
+    رُبطت <b>{{ auto_count }}</b> من <b>{{ images|length }}</b> صورة تلقائيًا من اسم الملف.
+    {% if images|length > auto_count %}اختر الملاحظة لما تبقّى، أو اتركه على «تجاهل».{% endif %}
   </p>
 
   <form method="post" action="{{ url_for('after_apply', job_id=job_id) }}">
     {% for name in images %}
-    <div class="missing-row">
-      <div class="row">
-        <img class="thumb" src="{{ url_for('after_thumb', job_id=job_id, name=name) }}" alt="">
-        <div class="grow">
-          <div class="note-text">{{ name }}</div>
-          <select name="img_{{ loop.index0 }}">
-            <option value="">— تجاهل هذه الصورة —</option>
-            {% for n in notes %}
-            <option value="{{ n.note_id }}"
-              {% if matches.get(name) == n.note_id %}selected{% endif %}>
-              {{ n.note_id }} — {{ n.desc[:60] }}{% if n.has_after %} (فيها صورة بعد مسبقًا){% endif %}
-            </option>
-            {% endfor %}
-          </select>
-        </div>
+    <div class="photo-row">
+      <img class="thumb" src="{{ url_for('after_thumb', job_id=job_id, name=name) }}" alt="">
+      <div class="grow">
+        <span class="file-name">{{ name }}</span>
+        <select name="img_{{ loop.index0 }}" aria-label="الملاحظة الخاصة بالصورة {{ name }}">
+          <option value="">— تجاهل هذه الصورة —</option>
+          {% for n in notes %}
+          <option value="{{ n.note_id }}" {% if matches.get(name) == n.note_id %}selected{% endif %}>
+            {{ n.note_id }} — {{ n.desc[:60] }}{% if n.has_after %} (فيها صورة بعد){% endif %}
+          </option>
+          {% endfor %}
+        </select>
       </div>
     </div>
     {% endfor %}
 
-    <button class="btn" type="submit">✅ إدراج الصور في التقرير</button>
+    <button class="btn" type="submit">إدراج الصور في التقرير</button>
   </form>
+
 </div>
 {% endblock %}

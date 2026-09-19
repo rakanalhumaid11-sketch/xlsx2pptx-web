@@ -3,14 +3,50 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0F1620">
   <title>{% block title %}تقرير صيانة المغذي{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;600&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <div class="topbar"><a href="{{ url_for('index') }}">📊 تقرير صيانة المغذي</a></div>
-  <div class="container">
+{% set ep = request.endpoint or '' %}
+<div class="layout">
+
+  <nav class="sidebar">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FF8D12" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M13 2 4 14h6l-1 8 9-12h-6z"></path>
+      </svg>
+      <span>صيانة المغذي</span>
+    </div>
+
+    <div class="nav">
+      <a href="{{ url_for('index') }}" {% if not ep.startswith('after') %}class="active"{% endif %}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14 3v5h5"></path>
+          <path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"></path>
+        </svg>
+        تقرير جديد
+      </a>
+      <a href="{{ url_for('after_form') }}" {% if ep.startswith('after') %}class="active"{% endif %}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+          <path d="m3 15 5-5 4 4 3-3 6 6"></path>
+        </svg>
+        صور بعد المعالجة
+      </a>
+    </div>
+  </nav>
+
+  <main class="main">
     {% block content %}{% endblock %}
-  </div>
-  <footer>يعمل هذا الموقع بالكامل على الإنترنت — لا حاجة لتثبيت شيء على جهازك.</footer>
+  </main>
+
+</div>
 </body>
 </html>

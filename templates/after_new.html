@@ -1,38 +1,85 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card">
-  <h1>🛠️ إضافة صور «بعد المعالجة»</h1>
-  <p class="hint">
-    ارفع التقرير الذي ولّدته من هنا، مع صور ما بعد الصيانة. الصورة التي يحمل
-    اسمها رقم الملاحظة تُوضع في شريحتها تلقائيًا، وما تبقّى تربطه بنفسك في
-    الخطوة التالية.
-  </p>
+<div class="wrap">
+
+  <div class="page-head">
+    <h1>صور بعد المعالجة</h1>
+    <p>ارفع التقرير مع الصور، وتُوزَّع على شرائحها.</p>
+  </div>
 
   {% if error %}<div class="errors">{{ error }}</div>{% endif %}
 
   <form method="post" action="{{ url_for('after_start') }}" enctype="multipart/form-data">
-    <label class="field">
-      <span class="field-label">ملف التقرير (‎.pptx‎)</span>
-      <input type="file" name="report_file" accept=".pptx" required>
-    </label>
 
-    <label class="field">
-      <span class="field-label">صور «بعد»</span>
-      <input type="file" name="photos" accept="image/*,.zip" multiple required>
-      <span class="hint">اختر عدة صور دفعة واحدة، أو ارفع ملفًا مضغوطًا (‎.zip‎) فيه الصور.</span>
+    <label class="dropzone" id="repZone" for="report_file" style="min-height:150px">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M14 3v5h5"></path>
+        <path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"></path>
+      </svg>
+      <span class="dz-title" id="repTitle">ملف التقرير</span>
+      <span class="dz-hint" id="repHint">اضغط للاختيار — صيغة ‎.pptx‎</span>
     </label>
+    <input class="hidden-input" id="report_file" type="file" name="report_file" accept=".pptx" required>
 
-    <button class="btn" type="submit">📤 رفع ومطابقة</button>
+    <div style="height:14px"></div>
+
+    <label class="dropzone" id="phZone" for="photos" style="min-height:150px">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+        <path d="m3 15 5-5 4 4 3-3 6 6"></path>
+      </svg>
+      <span class="dz-title" id="phTitle">صور بعد المعالجة</span>
+      <span class="dz-hint" id="phHint">اسحبها هنا أو اضغط — عدة صور، أو ملف ‎.zip‎</span>
+    </label>
+    <input class="hidden-input" id="photos" type="file" name="photos" accept="image/*,.zip" multiple required>
+
+    <span class="hint">الصورة التي يحمل اسمها رقم الملاحظة تُوضع في شريحتها تلقائيًا، والباقي تربطه في الخطوة التالية.</span>
+
+    <button class="btn" type="submit">رفع ومطابقة</button>
   </form>
+
 </div>
 
-<div class="card">
-  <h2>نصيحة تختصر عليك الوقت</h2>
-  <p class="hint">
-    إذا سمّى الفني كل صورة برقم الملاحظة (مثل <code>277915.jpg</code>) ستُوزَّع
-    كل الصور تلقائيًا بلا أي عمل يدوي. أي أرقام أخرى في الاسم تُتجاهل، فاسم
-    مثل <code>IMG_277915_2.jpg</code> يعمل أيضًا.
-  </p>
-  <p><a class="back-link" href="{{ url_for('index') }}">← رجوع إلى توليد تقرير جديد</a></p>
-</div>
+<script>
+(function () {
+  function bind(inputId, zoneId, titleId, hintId, single) {
+    var input = document.getElementById(inputId);
+    var zone = document.getElementById(zoneId);
+    var title = document.getElementById(titleId);
+    var hint = document.getElementById(hintId);
+
+    function show() {
+      var n = input.files ? input.files.length : 0;
+      if (!n) return;
+      zone.classList.add("filled");
+      if (single) {
+        title.textContent = input.files[0].name;
+        hint.textContent = (input.files[0].size / 1048576).toFixed(1) + " ميجابايت";
+      } else {
+        title.textContent = n === 1 ? input.files[0].name : "اختيرت " + n + " صورة";
+        hint.textContent = "جاهزة للرفع";
+      }
+    }
+    input.addEventListener("change", show);
+
+    ["dragenter", "dragover"].forEach(function (e) {
+      zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.add("drag"); });
+    });
+    ["dragleave", "drop"].forEach(function (e) {
+      zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.remove("drag"); });
+    });
+    zone.addEventListener("drop", function (ev) {
+      if (ev.dataTransfer && ev.dataTransfer.files.length) {
+        input.files = ev.dataTransfer.files;
+        show();
+      }
+    });
+  }
+
+  bind("report_file", "repZone", "repTitle", "repHint", true);
+  bind("photos", "phZone", "phTitle", "phHint", false);
+})();
+</script>
 {% endblock %}

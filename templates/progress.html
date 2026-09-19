@@ -1,59 +1,76 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card">
-  <h1 id="statusTitle">⏳ جاري توليد التقرير...</h1>
-  <p class="hint" id="statusHint">يشمل هذا تنزيل صور الملاحظات وبناء كل شريحة — قد يستغرق عدة دقائق بحسب عدد الملاحظات. لا تغلق الصفحة.</p>
-  <div class="progress-wrap">
-    <div class="progress-bar" id="bar">0%</div>
+<div class="wrap">
+
+  <div class="page-head">
+    <h1 id="statusTitle">جاري توليد التقرير</h1>
+    <p id="statusHint">يُبنى التقرير شريحة بشريحة. لا تغلق الصفحة.</p>
   </div>
+
+  <div id="liveBox">
+    <div class="pct" id="pct">0%</div>
+    <div class="progress-wrap"><div class="progress-bar" id="bar"></div></div>
+    <span class="hint" id="counter"></span>
+  </div>
+
   <div id="errorBox"></div>
+
   <div id="downloadBox" style="display:none;">
-    <a class="btn" id="downloadLink" href="#">⬇️ تحميل التقرير</a>
+    <a class="btn" id="downloadLink" href="#">تحميل التقرير</a>
     <ul class="stats" id="stats"></ul>
-    <p><a class="back-link" href="{{ url_for('index') }}">↻ توليد تقرير آخر</a></p>
+    <a class="back-link" href="{{ url_for('index') }}">توليد تقرير آخر</a>
   </div>
+
 </div>
 
 <script>
 var jobId = "{{ job_id }}";
+
 function poll() {
-  fetch("/job/" + jobId + "/status").then(r => r.json()).then(data => {
+  fetch("/job/" + jobId + "/status").then(function (r) { return r.json(); }).then(function (data) {
     if (data.stage === "error") {
-      document.getElementById("statusTitle").textContent = "❌ حدث خطأ";
+      document.getElementById("statusTitle").textContent = "تعذّر توليد التقرير";
       document.getElementById("statusHint").textContent = "";
-      document.getElementById("errorBox").innerHTML = '<div class="errors">' + (data.error_message || "خطأ غير معروف") + '</div>';
+      document.getElementById("liveBox").style.display = "none";
+      document.getElementById("errorBox").innerHTML =
+        '<div class="errors">' + (data.error_message || "خطأ غير معروف") + '</div>';
       return;
     }
+
     if (data.stage === "waiting") {
-      document.getElementById("statusTitle").textContent = "⏳ في الانتظار...";
-      document.getElementById("statusHint").textContent = "يوجد تقرير آخر قيد التوليد الآن. سيبدأ تقريرك تلقائيًا بعد ثوانٍ.";
+      document.getElementById("statusTitle").textContent = "في الانتظار";
+      document.getElementById("statusHint").textContent = "يوجد تقرير آخر قيد التوليد. سيبدأ تقريرك تلقائيًا بعد ثوانٍ.";
       setTimeout(poll, 1500);
       return;
     }
-    var p = data.progress || {done: 0, total: 1};
+
+    var p = data.progress || { done: 0, total: 1 };
     var pct = p.total > 0 ? Math.round((p.done / p.total) * 100) : 0;
-    var bar = document.getElementById("bar");
-    bar.style.width = pct + "%";
-    bar.textContent = pct + "%";
+    document.getElementById("bar").style.width = pct + "%";
+    document.getElementById("pct").textContent = pct + "%";
+    if (p.total > 1) {
+      document.getElementById("counter").textContent = p.done + " من " + p.total + " ملاحظة";
+    }
 
     if (data.stage === "done") {
-      document.getElementById("statusTitle").textContent = "✅ التقرير جاهز!";
-      document.getElementById("statusHint").textContent = "";
-      var dl = document.getElementById("downloadLink");
-      dl.href = "/job/" + jobId + "/download";
       var r = data.result || {};
+      document.getElementById("statusTitle").textContent = "التقرير جاهز";
+      document.getElementById("statusHint").textContent = "نزّله الآن — تُحذف الملفات من الخادم تلقائيًا بعد ساعات قليلة.";
+      document.getElementById("liveBox").style.display = "none";
+      document.getElementById("downloadLink").href = "/job/" + jobId + "/download";
       document.getElementById("stats").innerHTML =
-        "<li>المغذي: <b>" + (r.feeder || "—") + "</b></li>" +
-        "<li>عدد الملاحظات: <b>" + (r.records || 0) + "</b></li>" +
-        "<li>عدد أنواع الملاحظات: <b>" + (r.types || 0) + "</b></li>" +
-        "<li>إجمالي الشرائح: <b>" + (r.slides || 0) + "</b></li>" +
-        "<li>صور تم إدراجها: <b>" + (r.photos_ok || 0) + "</b>" +
-        (r.photos_missing ? " — بدون صورة: <b>" + r.photos_missing + "</b>" : "") + "</li>";
+        "<li><span>المغذي</span><b>" + (r.feeder || "—") + "</b></li>" +
+        "<li><span>عدد الملاحظات</span><b>" + (r.records || 0) + "</b></li>" +
+        "<li><span>أنواع الملاحظات</span><b>" + (r.types || 0) + "</b></li>" +
+        "<li><span>إجمالي الشرائح</span><b>" + (r.slides || 0) + "</b></li>" +
+        "<li><span>صور أُدرجت</span><b>" + (r.photos_ok || 0) +
+        (r.photos_missing ? " — بدون صورة: " + r.photos_missing : "") + "</b></li>";
       document.getElementById("downloadBox").style.display = "block";
       return;
     }
+
     setTimeout(poll, 1200);
-  }).catch(function() { setTimeout(poll, 2000); });
+  }).catch(function () { setTimeout(poll, 2000); });
 }
 poll();
 </script>

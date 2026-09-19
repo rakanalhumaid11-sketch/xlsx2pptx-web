@@ -1,20 +1,30 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card">
+<div class="wrap">
+
   {% if error %}
-  <h1>❌ حدث خطأ</h1>
+  <div class="page-head">
+    <h1>تعذّر إدراج الصور</h1>
+  </div>
   <div class="errors">{{ error }}</div>
-  <p><a class="back-link" href="{{ url_for('after_form') }}">← المحاولة من جديد</a></p>
+  <a class="back-link" href="{{ url_for('after_form') }}">المحاولة من جديد</a>
+
   {% else %}
-  <h1>✅ تم إدراج الصور</h1>
+  <div class="page-head">
+    <h1>تم إدراج الصور</h1>
+    <p>نزّل التقرير الآن — تُحذف الملفات من الخادم تلقائيًا بعد ساعات قليلة.</p>
+  </div>
+
+  <a class="btn" href="{{ url_for('after_download', job_id=job_id) }}">تحميل التقرير</a>
+
   <ul class="stats">
-    <li>صور أُضيفت: <b>{{ result.added }}</b></li>
-    {% if result.replaced %}<li>صور استبدلت صورة سابقة: <b>{{ result.replaced }}</b></li>{% endif %}
-    {% if result.skipped %}<li>صور تعذّر إدراجها: <b>{{ result.skipped }}</b></li>{% endif %}
+    <li><span>صور أُضيفت</span><b>{{ result.added }}</b></li>
+    {% if result.replaced %}<li><span>استبدلت صورة سابقة</span><b>{{ result.replaced }}</b></li>{% endif %}
+    {% if result.skipped %}<li><span>تعذّر إدراجها</span><b>{{ result.skipped }}</b></li>{% endif %}
   </ul>
-  <a class="btn" href="{{ url_for('after_download', job_id=job_id) }}">⬇️ تحميل التقرير</a>
-  <p class="hint">نزّل الملف الآن — الملفات تُحذف من الخادم تلقائيًا بعد ساعات قليلة.</p>
-  <p><a class="back-link" href="{{ url_for('index') }}">← الصفحة الرئيسية</a></p>
+
+  <a class="back-link" href="{{ url_for('after_form') }}">إضافة صور أخرى</a>
   {% endif %}
+
 </div>
 {% endblock %}

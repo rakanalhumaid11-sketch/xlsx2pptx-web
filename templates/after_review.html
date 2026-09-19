@@ -18,6 +18,9 @@
       <img class="thumb" src="{{ url_for('after_thumb', job_id=job_id, name=name) }}" alt="">
       <div class="grow">
         <span class="file-name">{{ name }}</span>
+        <input class="opt-search" type="search" autocomplete="off"
+               placeholder="ابحث برقم الملاحظة أو بوصفها"
+               aria-label="بحث في ملاحظات الصورة {{ name }}">
         <select name="img_{{ loop.index0 }}" aria-label="الملاحظة الخاصة بالصورة {{ name }}">
           <option value="">— تجاهل هذه الصورة —</option>
           {% for n in notes %}
@@ -26,6 +29,7 @@
           </option>
           {% endfor %}
         </select>
+        <span class="match-count"></span>
       </div>
     </div>
     {% endfor %}
@@ -34,4 +38,46 @@
   </form>
 
 </div>
+
+<script>
+// خانة بحث فوق كل قائمة: تُخفي الخيارات غير المطابقة بدل التمرير بين مئات
+// الملاحظات. البحث يقبل رقم الملاحظة أو أي كلمة من وصفها.
+(function () {
+  Array.prototype.forEach.call(document.querySelectorAll(".photo-row"), function (row) {
+    var input = row.querySelector(".opt-search");
+    var sel = row.querySelector("select");
+    var counter = row.querySelector(".match-count");
+    if (!input || !sel) return;
+    var opts = Array.prototype.slice.call(sel.options);
+
+    function filter() {
+      var q = input.value.trim().toLowerCase();
+      var shown = [];
+      opts.forEach(function (o, i) {
+        if (i === 0) { o.hidden = false; return; }          // خيار "تجاهل" يبقى دائمًا
+        var hit = !q || o.text.toLowerCase().indexOf(q) !== -1;
+        o.hidden = !hit;
+        if (hit) shown.push(o);
+      });
+
+      if (!q) {
+        counter.textContent = "";
+      } else if (shown.length === 0) {
+        counter.textContent = "لا توجد ملاحظة مطابقة";
+      } else if (shown.length === 1) {
+        sel.value = shown[0].value;                          // نتيجة واحدة: نختارها فورًا
+        counter.textContent = "اختيرت تلقائيًا";
+      } else {
+        counter.textContent = shown.length + " ملاحظة مطابقة";
+      }
+    }
+
+    input.addEventListener("input", filter);
+    // Enter داخل خانة البحث يجب ألا يُرسل النموذج قبل إكمال الربط
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); sel.focus(); }
+    });
+  });
+})();
+</script>
 {% endblock %}

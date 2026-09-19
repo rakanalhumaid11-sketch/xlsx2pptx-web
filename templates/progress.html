@@ -84,8 +84,10 @@ function poll() {
       return;
     }
 
-    setTimeout(poll, 1200);
-  }).catch(function () { setTimeout(poll, 2000); });
+    // نسأل الخادم كل ثانية في البداية ثم نخفّف إلى كل ثلاث ثوانٍ: التقارير
+    // الطويلة لا تحتاج تحديثًا لحظيًا، وتقليل الطلبات يخفّف الحمل عن الخادم
+    setTimeout(poll, p.done > 20 ? 3000 : 1200);
+  }).catch(function () { setTimeout(poll, 3000); });
 }
 poll();
 </script>

@@ -500,3 +500,14 @@ input[type="number"] { -moz-appearance: textfield; }
   color: var(--text); background: var(--surface);
   border: 1px solid var(--border-2); border-radius: 10px;
 }
+
+.howto {
+  margin: -6px 0 18px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.howto summary { cursor: pointer; font-size: 14px; color: var(--accent); }
+.howto ol { margin: 12px 0 0; padding-inline-start: 20px; font-size: 14px; color: var(--muted); line-height: 2; }
+.howto b { color: var(--text); font-weight: 500; }

@@ -574,6 +574,19 @@ def zones_move(job_id):
     return redirect(url_for("zones_map", job_id=job_id, k=k, slack=slack))
 
 
+@app.route("/job/<job_id>/zones/csv")
+def zones_csv(job_id):
+    """جدول لاستيراده في «خرائطي» — يلوّن الزونات تلقائيًا حسب عمود الزون."""
+    state, k, slack = _zones_state(job_id)
+    zones.mark_isolation(state["points"])
+    built = _built_zones(state, k, slack)
+    feeder = state.get("feeder") or "المغذي"
+    return Response(
+        zones.build_csv(built), mimetype="text/csv",
+        headers={"Content-Disposition":
+                 "attachment; filename*=UTF-8''%D8%B2%D9%88%D9%86%D8%A7%D8%AA.csv"})
+
+
 @app.route("/job/<job_id>/zones/kml")
 def zones_kml(job_id):
     state, k, slack = _zones_state(job_id)

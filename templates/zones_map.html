@@ -34,11 +34,23 @@
     </div>
     <span class="hint">رابط واحد يفتح هذه الخريطة بكل الزونات وألوانها — أرسله للفرق كما هو.</span>
     <div class="share-row" style="margin-top:12px">
-      <a class="btn btn-ghost" href="{{ url_for('zones_kml', job_id=job_id, k=k, slack=slack) }}">تحميل ملف قوقل مابس (KML)</a>
+      <a class="btn btn-ghost" href="{{ url_for('zones_csv', job_id=job_id, k=k, slack=slack) }}">ملف «خرائطي» (CSV)</a>
+      <a class="btn btn-ghost" href="{{ url_for('zones_kml', job_id=job_id, k=k, slack=slack) }}">ملف KML</a>
       <button type="button" class="btn btn-ghost" id="copyAll">نسخ مسارات كل الزونات</button>
       <span class="hint" id="copyAllMsg"></span>
     </div>
   </div>
+
+  <details class="howto">
+    <summary>كيف أعرض الزونات على «خرائطي» بلون لكل زون؟</summary>
+    <ol>
+      <li>نزّل ملف «خرائطي» (CSV) أعلاه.</li>
+      <li>افتح <span dir="ltr">google.com/mymaps</span> ← إنشاء خريطة جديدة ← استيراد، واختر الملف.</li>
+      <li>يسألك عن أعمدة الموقع: اختر <b>خط العرض</b> و<b>خط الطول</b>. ثم عنوان العلامات: اختر <b>رقم الملاحظة</b>.</li>
+      <li>في الطبقة اضغط <b>تصنيف الأماكن حسب</b> ← <b>الزون</b>، فيصير لكل زون لون تلقائيًا.</li>
+      <li>اضغط <b>مشاركة</b> ← فعّل الرابط، وانسخه وأرسله للفرق. هذا رابط قوقل دائم لا يعتمد على موقعنا.</li>
+    </ol>
+  </details>
 
   {% if n_isolated %}
   <p class="summary-line">

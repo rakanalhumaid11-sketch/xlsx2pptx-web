@@ -385,6 +385,31 @@ def build_zones(points: List[Dict[str, Any]], k: int, slack: float = 0.0,
 
 # --------------------------------------------------------------------- KML
 
+def build_csv(zones_list: List[Dict[str, Any]]) -> str:
+    """جدول مهيّأ لاستيراد «خرائطي» (Google My Maps): عمود الزون يُستخدم في
+    «تصنيف الأماكن حسب» فتلوّن الخريطة كل زون بلون تلقائيًا، وعمودا خط العرض
+    والطول لتحديد المواقع، ورقم الملاحظة عنوانًا للدبوس."""
+    import csv
+    import io as _io
+
+    buf = _io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["رقم الملاحظة", "الزون", "المقاول", "الملاحظة", "المكتب",
+                "الترتيب", "خط العرض", "خط الطول", "رابط الصورة", "رابط الموقع"])
+    for z in zones_list:
+        label = f'زون {z["index"]}' + (f' — {z["name"]}' if z.get("name") else "")
+        for i, p in enumerate(z["points"], 1):
+            w.writerow([
+                p.get("note_id", ""), label, z.get("name", ""),
+                p.get("note", ""), p.get("office", ""), i,
+                f'{p["lat"]:.7f}', f'{p["lon"]:.7f}',
+                p.get("photo", ""),
+                f'https://www.google.com/maps?q={p["lat"]:.7f},{p["lon"]:.7f}',
+            ])
+    # BOM حتى يفتح الملف بالعربية الصحيحة في إكسل أيضًا
+    return "﻿" + buf.getvalue()
+
+
 def _esc(s: str) -> str:
     return (str(s).replace("&", "&amp;").replace("<", "&lt;")
             .replace(">", "&gt;").replace('"', "&quot;"))

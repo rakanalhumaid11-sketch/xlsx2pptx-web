@@ -7,6 +7,8 @@ app.py
 شرائح: كل ذلك يُستنتج من الإكسل تلقائيًا.
 """
 
+import contextlib
+import fcntl
 import json
 import os
 import shutil
@@ -20,6 +22,7 @@ from flask import (
     send_file, jsonify, abort,
 )
 
+import afterfill
 import builder
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -80,6 +83,26 @@ def write_state(d: str, state: Dict[str, Any]):
     os.replace(tmp, p)
 
 
+HEAVY_LOCK_PATH = os.path.join(JOBS_DIR, ".heavy.lock")
+
+
+@contextlib.contextmanager
+def heavy_lock():
+    """طابور: يسمح بعملية ثقيلة واحدة فقط (توليد تقرير أو إدراج صور) في وقت
+    واحد على مستوى الخادم كله. ذروة الذاكرة للعملية الواحدة تقارب 300 ميجا،
+    والخادم المجاني لا يملك إلا 512، فلو تصادفت عمليتان لانهار التشغيل. قفل
+    على ملف يعمل عبر كل عمّال gunicorn لأنها عمليات منفصلة."""
+    f = open(HEAVY_LOCK_PATH, "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(f, fcntl.LOCK_UN)
+        finally:
+            f.close()
+
+
 def cleanup_old_jobs(max_age_hours: float = 3.0):
     now = time.time()
     try:
@@ -137,25 +160,30 @@ def _run_generation(job_id: str):
     d = os.path.join(JOBS_DIR, job_id)
     state = read_state(d)
     try:
-        state["stage"] = "generating"
+        state["stage"] = "waiting"
         write_state(d, state)
 
-        last = [0.0]
-
-        def progress_cb(done, total):
-            # نكتب الحالة مرة كل نصف ثانية على الأكثر حتى لا نُثقل القرص
-            now = time.time()
-            if now - last[0] < 0.5 and done < total:
-                return
-            last[0] = now
+        with heavy_lock():
             st = read_state(d)
-            st["progress"] = {"done": done, "total": total}
+            st["stage"] = "generating"
             write_state(d, st)
 
-        result = builder.build_report(
-            state["excel_path"], state["output_path"],
-            notice=state.get("notice", ""), progress_cb=progress_cb,
-        )
+            last = [0.0]
+
+            def progress_cb(done, total):
+                # نكتب الحالة مرة كل نصف ثانية على الأكثر حتى لا نُثقل القرص
+                now = time.time()
+                if now - last[0] < 0.5 and done < total:
+                    return
+                last[0] = now
+                s2 = read_state(d)
+                s2["progress"] = {"done": done, "total": total}
+                write_state(d, s2)
+
+            result = builder.build_report(
+                state["excel_path"], state["output_path"],
+                notice=state.get("notice", ""), progress_cb=progress_cb,
+            )
 
         # ملف الإكسل ضخم (يحوي الصور بداخله) ولم نعد بحاجته بعد بناء التقرير،
         # فنحذفه فورًا حتى لا تمتلئ مساحة الخادم عند توليد عدة تقارير.
@@ -203,6 +231,153 @@ def job_download(job_id):
     feeder = (state.get("result") or {}).get("feeder") or "المغذي"
     return send_file(state["output_path"], as_attachment=True,
                      download_name=f"تقرير_{feeder}.pptx")
+
+
+# --------------------------------------------------------------------------
+# إضافة صور «بعد المعالجة» إلى تقرير جاهز
+# --------------------------------------------------------------------------
+
+@app.route("/after", methods=["GET"])
+def after_form():
+    return render_template("after_new.html")
+
+
+@app.route("/after/start", methods=["POST"])
+def after_start():
+    report = request.files.get("report_file")
+    photos = [f for f in request.files.getlist("photos") if f and f.filename]
+
+    if not report or not report.filename:
+        return render_template("after_new.html", error="الرجاء اختيار ملف التقرير."), 400
+    if not report.filename.lower().endswith(".pptx"):
+        return render_template("after_new.html", error="ملف التقرير يجب أن يكون ‎.pptx‎."), 400
+    if not photos:
+        return render_template("after_new.html", error="الرجاء اختيار صور «بعد» أولًا."), 400
+
+    job_id, d = new_job_dir()
+    report_path = os.path.join(d, "report_in.pptx")
+    report.save(report_path)
+
+    raw_dir = os.path.join(d, "raw")
+    os.makedirs(raw_dir, exist_ok=True)
+    raw_paths = []
+    for f in photos:
+        p = os.path.join(raw_dir, os.path.basename(f.filename))
+        f.save(p)
+        raw_paths.append(p)
+
+    images_dir = os.path.join(d, "photos")
+    names = afterfill.collect_images(raw_paths, images_dir)
+    shutil.rmtree(raw_dir, ignore_errors=True)
+    if not names:
+        shutil.rmtree(d, ignore_errors=True)
+        return render_template("after_new.html",
+                               error="لم يُعثر على أي صور صالحة في ما رفعته."), 400
+
+    try:
+        notes = afterfill.analyze_report(report_path)
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(d, ignore_errors=True)
+        return render_template("after_new.html",
+                               error=f"تعذّرت قراءة ملف التقرير: {exc}"), 400
+    if not notes:
+        shutil.rmtree(d, ignore_errors=True)
+        return render_template(
+            "after_new.html",
+            error="لم يُعثر على شرائح ملاحظات في هذا الملف. تأكد أنه التقرير المولَّد من هذا الموقع."), 400
+
+    thumbs_dir = os.path.join(d, "thumbs")
+    os.makedirs(thumbs_dir, exist_ok=True)
+    valid = []
+    for name in names:
+        try:
+            afterfill.make_thumbnail(os.path.join(images_dir, name),
+                                     os.path.join(thumbs_dir, name + ".jpg"))
+            valid.append(name)
+        except Exception:  # noqa: BLE001
+            continue
+
+    matches = afterfill.auto_match(valid, notes)
+    write_state(d, {
+        "job_id": job_id,
+        "kind": "after",
+        "report_path": report_path,
+        "images_dir": images_dir,
+        "thumbs_dir": thumbs_dir,
+        "output_path": os.path.join(d, "report_after.pptx"),
+        "notes": notes,
+        "images": valid,
+        "matches": matches,
+        "stage": "review",
+        "created_at": time.time(),
+    })
+    return redirect(url_for("after_review", job_id=job_id))
+
+
+@app.route("/job/<job_id>/after/review", methods=["GET"])
+def after_review(job_id):
+    d = job_dir(job_id)
+    state = read_state(d)
+    if state.get("kind") != "after":
+        abort(404)
+    notes = state["notes"]
+    matches = state.get("matches", {})
+    return render_template("after_review.html", job_id=job_id, notes=notes,
+                           images=state["images"], matches=matches,
+                           auto_count=len(matches))
+
+
+@app.route("/job/<job_id>/after/thumb/<path:name>")
+def after_thumb(job_id, name):
+    d = job_dir(job_id)
+    state = read_state(d)
+    if state.get("kind") != "after" or name not in state.get("images", []):
+        abort(404)
+    return send_file(os.path.join(state["thumbs_dir"], name + ".jpg"),
+                     mimetype="image/jpeg")
+
+
+@app.route("/job/<job_id>/after/apply", methods=["POST"])
+def after_apply(job_id):
+    d = job_dir(job_id)
+    state = read_state(d)
+    if state.get("kind") != "after":
+        abort(404)
+
+    assignments = {}
+    for i, name in enumerate(state["images"]):
+        note_id = (request.form.get(f"img_{i}") or "").strip()
+        if note_id:
+            assignments[name] = note_id
+
+    if not assignments:
+        return redirect(url_for("after_review", job_id=job_id))
+
+    try:
+        with heavy_lock():
+            result = afterfill.apply_after_photos(
+                state["report_path"], state["output_path"], assignments, state["images_dir"])
+    except Exception as exc:  # noqa: BLE001
+        state["stage"] = "error"
+        state["error_message"] = f"{type(exc).__name__}: {exc}"
+        write_state(d, state)
+        return render_template("after_result.html", job_id=job_id, result=None,
+                               error=state["error_message"])
+
+    state["stage"] = "done"
+    state["result"] = result
+    write_state(d, state)
+    return render_template("after_result.html", job_id=job_id, result=result, error=None)
+
+
+@app.route("/job/<job_id>/after/download")
+def after_download(job_id):
+    d = job_dir(job_id)
+    state = read_state(d)
+    if state.get("kind") != "after" or state.get("stage") != "done":
+        abort(404)
+    return send_file(state["output_path"], as_attachment=True,
+                     download_name="تقرير_الملاحظات_مع_صور_بعد.pptx")
 
 
 if __name__ == "__main__":

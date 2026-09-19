@@ -193,14 +193,17 @@ select { cursor: pointer; }
   border-radius: 10px;
   cursor: pointer;
 }
-.btn:hover { background: var(--accent-soft); }
+/* a:hover العامة كانت تلوّن نص الزر بلون الخلفية نفسها فيختفي — نثبّت اللون */
+.btn:hover { background: var(--accent-soft); color: var(--accent-ink); }
+a.btn, a.btn:hover { color: var(--accent-ink); }
+a.btn-ghost, a.btn-ghost:hover { color: var(--text); }
 
 .btn-ghost {
   color: var(--text);
   background: transparent;
   border: 1px solid var(--border-2);
 }
-.btn-ghost:hover { background: var(--surface); color: var(--text); }
+.btn-ghost:hover { background: var(--surface); color: var(--text); border-color: var(--accent); }
 
 .back-link {
   display: inline-block;
@@ -409,6 +412,8 @@ select { cursor: pointer; }
   cursor: pointer;
 }
 .chip:hover { border-color: var(--accent); color: var(--accent-soft); }
+.chip.zone-dl { width: 100%; justify-content: center; min-height: 40px; font-weight: 500; }
+.chip.zone-dl:hover { background: #1A2635; }
 .chip.copy { color: var(--muted); }
 .chip.copy-zone {
   margin-top: 10px;

@@ -12,7 +12,7 @@
     <form class="zone-bar" method="get" action="{{ url_for('zones_map', job_id=job_id) }}">
     <span class="zb-item">
       <label class="field-label" for="k">عدد الزونات</label>
-      <input id="k" type="number" name="k" value="{{ k }}" min="1" max="{{ max_zones }}" inputmode="numeric">
+      <input id="k" type="text" name="k" value="{{ k }}" inputmode="numeric" autocomplete="off">
     </span>
     <span class="zb-item">
       <label class="field-label" for="slack">تقارب المسافات</label>
@@ -28,23 +28,10 @@
 
   <div class="share-box">
     <div class="share-row">
-      <a class="btn" href="{{ url_for('zones_kml', job_id=job_id, k=k, slack=slack) }}">تحميل ملف الزونات (KML)</a>
-      <button type="button" class="btn btn-ghost" id="copyAll">نسخ مسارات كل الزونات</button>
-      <span class="hint" id="copyAllMsg"></span>
+      <a class="btn" href="{{ url_for('zones_kml', job_id=job_id, k=k, slack=slack) }}">تحميل كل الزونات (KML)</a>
     </div>
-    <span class="hint">استورده في «خرائطي» ثم شاركه — رابط قوقل دائم لا يعتمد على هذا الموقع.</span>
+    <span class="hint">ملف واحد فيه كل الزونات بألوانها. ولكل زون ملفه المستقل في بطاقته أدناه.</span>
   </div>
-
-  <details class="howto">
-    <summary>كيف أعرض الزونات على «خرائطي» وأشاركها؟</summary>
-    <ol>
-      <li>نزّل ملف الزونات (KML) أعلاه.</li>
-      <li>افتح <span dir="ltr">google.com/mymaps</span> ← إنشاء خريطة جديدة ← استيراد، واختر الملف.</li>
-      <li>كل زون يصير <b>طبقة مستقلة</b> باسم مقاوله، ودبابيسه بلون مختلف عن بقية الزونات.</li>
-      <li>إن ظهرت الدبابيس بلون واحد، اضغط أيقونة <b>الدهان</b> بجانب اسم الطبقة واختر لونها — نقرة لكل زون.</li>
-      <li>اضغط <b>مشاركة</b> ← فعّل الرابط، وانسخه وأرسله للفرق.</li>
-    </ol>
-  </details>
 
   {% if n_isolated %}
   <p class="summary-line">
@@ -64,7 +51,7 @@
       <div class="zone-card">
         <div class="zc-head">
           <span class="swatch" style="background: {{ z.color }}"></span>
-          <b>زون {{ z.index }}</b>
+          <b>زون {{ z.index }} — {{ z.color_name }}</b>
           <span class="zmeta">{{ z.count }} ملاحظة · مسار {{ z.route_km }} كم · امتداد {{ z.span_km }} كم</span>
         </div>
 
@@ -72,15 +59,13 @@
           <input type="text" name="name_{{ z.index }}" value="{{ z.name }}"
                  placeholder="اسم المقاول" list="contractorList"
                  aria-label="اسم المقاول لزون {{ z.index }}">
-          <input type="number" name="cap_{{ z.index }}" value="{{ z.count }}" min="1"
-                 aria-label="عدد الملاحظات لزون {{ z.index }}">
+          <input type="text" name="cap_{{ z.index }}" value="{{ z.count }}" inputmode="numeric"
+                 autocomplete="off" aria-label="عدد الملاحظات لزون {{ z.index }}">
         </div>
 
         <div class="zc-links">
-          {% for lnk in z.links %}
-          <a class="chip" href="{{ lnk.url }}" target="_blank" rel="noopener">مسار {{ lnk.index }} ({{ lnk.stops }})</a>
-          {% endfor %}
-          <button type="button" class="chip copy-zone" data-zone="{{ z.index }}">نسخ الزون</button>
+          <a class="chip zone-dl" href="{{ url_for('zones_kml_one', job_id=job_id, zone_no=z.index, k=k, slack=slack) }}"
+             style="border-color: {{ z.color }}; color: {{ z.color }}">تحميل هذا الزون (KML)</a>
         </div>
       </div>
       {% endfor %}
@@ -115,6 +100,8 @@ var ZONES = {{ zones|tojson }};
 var FEEDER = {{ (feeder or "")|tojson }};
 var READONLY = false;
 var ZONE_COUNT = ZONES.length;
+var ZONE_NAMES = {};
+ZONES.forEach(function (z) { ZONE_NAMES[z.index] = z.color_name; });
 
 var map = L.map("map", { scrollWheelZoom: true });
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -129,7 +116,7 @@ function moveOptions(current, noteId) {
   out += '<option value="">انقل إلى زون…</option>';
   for (var i = 1; i <= ZONE_COUNT; i++) {
     if (i === current) continue;
-    out += '<option value="' + i + '">زون ' + i + '</option>';
+    out += '<option value="' + i + '">زون ' + i + ' — ' + (ZONE_NAMES[i] || '') + '</option>';
   }
   out += '<option value="0">إرجاع للتقسيم التلقائي</option>';
   return out + "</select>";
@@ -171,7 +158,8 @@ ZONES.forEach(function (z) {
     L.marker([p.lat, p.lon], { icon: icon }).addTo(map).bindPopup(
       "<b>ملاحظة " + label + "</b><br>" +
       (p.note || "") + "<br>" +
-      "زون " + z.index + (z.name ? " — " + z.name : "") + " · الترتيب " + (i + 1) + "<br>" +
+      "زون " + z.index + " — " + z.color_name + (z.name ? " — " + z.name : "") +
+      " · الترتيب " + (i + 1) + "<br>" +
       (p.isolated ? "<b>معزولة</b> — أقرب ملاحظة على بعد " + p.iso_km + " كم<br>" : "") +
       photo +
       '<a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' +
@@ -194,52 +182,5 @@ function toggleLabels() {
 map.on("zoomend", toggleLabels);
 toggleLabels();
 
-function copyText(text, done) {
-  if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).then(done, function () { fallback(text, done); });
-  } else { fallback(text, done); }
-}
-function fallback(text, done) {
-  var t = document.createElement("textarea");
-  t.value = text; t.style.position = "fixed"; t.style.opacity = "0";
-  document.body.appendChild(t); t.select();
-  try { document.execCommand("copy"); } catch (e) {}
-  document.body.removeChild(t); done();
-}
-function flash(el, label) {
-  var old = el.textContent;
-  el.textContent = label;
-  setTimeout(function () { el.textContent = old; }, 1800);
-}
-function zoneText(z) {
-  var head = "زون " + z.index + (z.name ? " — " + z.name : "") +
-             " · " + z.count + " ملاحظة · مسار " + z.route_km + " كم";
-  var lines = [head];
-  z.links.forEach(function (l) {
-    lines.push("مسار " + l.index + " (" + l.stops + " مواقع): " + l.url);
-  });
-  return lines.join("\n");
-}
-
-if (!READONLY) {
-  document.getElementById("copyAll").addEventListener("click", function () {
-    var msg = document.getElementById("copyAllMsg");
-    var head = "زونات العمل" + (FEEDER ? " — " + FEEDER : "") + "\n" +
-               ZONES.length + " زون · " +
-               ZONES.reduce(function (s, z) { return s + z.count; }, 0) + " ملاحظة";
-    copyText(head + "\n\n" + ZONES.map(zoneText).join("\n\n"), function () {
-      msg.textContent = "نُسخت مسارات كل الزونات.";
-      setTimeout(function () { msg.textContent = ""; }, 4000);
-    });
-  });
-
-  document.querySelectorAll(".chip.copy-zone").forEach(function (b) {
-    b.addEventListener("click", function () {
-      var idx = parseInt(b.getAttribute("data-zone"), 10);
-      var z = ZONES.filter(function (x) { return x.index === idx; })[0];
-      if (z) copyText(zoneText(z), function () { flash(b, "نُسخ"); });
-    });
-  });
-}
 </script>
 {% endblock %}

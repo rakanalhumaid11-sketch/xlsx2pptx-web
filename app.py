@@ -406,11 +406,7 @@ def zones_form():
 @app.route("/zones/start", methods=["POST"])
 def zones_start():
     excel = request.files.get("excel_file")
-    try:
-        k = int(request.form.get("zones") or 4)
-    except ValueError:
-        k = 4
-    k = max(1, min(k, zones.MAX_ZONES))
+    k = max(1, min(_int_ar(request.form.get("zones"), 4), zones.MAX_ZONES))
 
     if not excel or not excel.filename:
         return render_template("zones_new.html", max_zones=zones.MAX_ZONES,
@@ -463,15 +459,26 @@ def zones_start():
     return redirect(url_for("zones_map", job_id=job_id, k=k))
 
 
+def _int_ar(value, default=0):
+    """يقرأ رقمًا مكتوبًا بالأرقام العربية (٥) أو اللاتينية (5) على السواء."""
+    if value is None:
+        return default
+    s = str(value).strip()
+    if not s:
+        return default
+    trans = str.maketrans("٠١٢٣٤٥٦٧٨٩" + "۰۱۲۳۴۵۶۷۸۹", "0123456789" * 2)
+    try:
+        return int(s.translate(trans))
+    except ValueError:
+        return default
+
+
 def _zones_state(job_id):
     d = job_dir(job_id)
     state = read_state(d)
     if state.get("kind") != "zones":
         abort(404)
-    try:
-        k = int(request.values.get("k") or state.get("zones") or 4)
-    except ValueError:
-        k = 4
+    k = _int_ar(request.values.get("k"), state.get("zones") or 4)
     k = max(1, min(k, zones.MAX_ZONES, len(state["points"])))
     try:
         slack = float(request.values.get("slack", state.get("slack", 0)))
@@ -479,6 +486,15 @@ def _zones_state(job_id):
         slack = 0.0
     slack = max(0.0, min(1.0, slack))
     return state, k, slack
+
+
+def _kml_response(kml_text, filename_stem):
+    """يرسل ملف KML باسم عربي صحيح (ترميز RFC 5987 حتى لا يُشوَّه الاسم)."""
+    from urllib.parse import quote
+    name = quote(f"{filename_stem}.kml".replace("/", "-"), safe="")
+    return Response(
+        kml_text, mimetype="application/vnd.google-earth.kml+xml",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{name}"})
 
 
 def _built_zones(state, k, slack):
@@ -514,10 +530,7 @@ def zones_settings(job_id):
         nm = (request.form.get(f"name_{i}") or "").strip()
         if nm:
             names[str(i)] = nm[:40]
-        try:
-            cap = int(request.form.get(f"cap_{i}") or 0)
-        except ValueError:
-            cap = 0
+        cap = _int_ar(request.form.get(f"cap_{i}"), 0)
         if cap > 0:
             caps[str(i)] = cap
     state["names"] = names
@@ -540,10 +553,7 @@ def zones_move(job_id):
     if reset:
         overrides = {}
     elif note_id:
-        try:
-            z = int(request.form.get("zone") or 0)
-        except ValueError:
-            z = 0
+        z = _int_ar(request.form.get("zone"), 0)
         if z <= 0:
             overrides.pop(note_id, None)      # إرجاعها لتقدير الخوارزمية
         else:
@@ -556,17 +566,30 @@ def zones_move(job_id):
     return redirect(url_for("zones_map", job_id=job_id, k=k, slack=slack))
 
 
+@app.route("/job/<job_id>/zones/kml/<int:zone_no>")
+def zones_kml_one(job_id, zone_no):
+    """ملف KML لزون واحد بنفس لونه في الملف الشامل — يُرسل لفريقه وحده."""
+    state, k, slack = _zones_state(job_id)
+    zones.mark_isolation(state["points"])
+    built = _built_zones(state, k, slack)
+    one = [z for z in built if z["index"] == zone_no]
+    if not one:
+        abort(404)
+    z = one[0]
+    title = f'زون {z["index"]} — {z["color_name"]}'
+    if z.get("name"):
+        title += f' — {z["name"]}'
+    return _kml_response(zones.build_kml(one, title), title)
+
+
 @app.route("/job/<job_id>/zones/kml")
 def zones_kml(job_id):
     state, k, slack = _zones_state(job_id)
     zones.mark_isolation(state["points"])
     built = _built_zones(state, k, slack)
     feeder = state.get("feeder") or "المغذي"
-    kml = zones.build_kml(built, f"زونات {feeder}")
-    return Response(
-        kml, mimetype="application/vnd.google-earth.kml+xml",
-        headers={"Content-Disposition":
-                 f"attachment; filename*=UTF-8''%D8%B2%D9%88%D9%86%D8%A7%D8%AA.kml"})
+    title = f"زونات {feeder}"
+    return _kml_response(zones.build_kml(built, title), title)
 
 
 if __name__ == "__main__":

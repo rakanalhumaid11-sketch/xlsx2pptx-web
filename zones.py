@@ -21,17 +21,17 @@ from typing import Any, Dict, List, Optional, Tuple
 # زون أيقونة ملوّنة مسبقًا من روابط قوقل القياسية، فتظهر الزونات بألوانها فور
 # الاستيراد بلا تلوين يدوي. ولون الموقع مطابق للون الأيقونة حتى تتفق الخريطتان.
 ZONE_PALETTE = [
-    ("#DB4436", "red"),      # أحمر
-    ("#4186F0", "blu"),      # أزرق
-    ("#0F9D58", "grn"),      # أخضر
-    ("#F4B400", "ylw"),      # أصفر
-    ("#A23BC6", "purple"),   # بنفسجي
-    ("#FF9900", "orange"),   # برتقالي
-    ("#62AFF0", "ltblu"),    # أزرق فاتح
-    ("#E9548D", "pink"),     # وردي
+    ("#DB4436", "red", "أحمر"),
+    ("#4186F0", "blu", "أزرق"),
+    ("#0F9D58", "grn", "أخضر"),
+    ("#F4B400", "ylw", "أصفر"),
+    ("#A23BC6", "purple", "بنفسجي"),
+    ("#FF9900", "orange", "برتقالي"),
+    ("#62AFF0", "ltblu", "سماوي"),
+    ("#E9548D", "pink", "وردي"),
 ]
 
-ZONE_COLORS = [c for c, _ in ZONE_PALETTE]
+ZONE_COLORS = [c for c, _, _ in ZONE_PALETTE]
 
 MAX_ZONES = 8
 
@@ -41,6 +41,11 @@ ICON_BASE = "https://maps.google.com/mapfiles/kml/paddle/"
 
 def color_for(i: int) -> str:
     return ZONE_PALETTE[i % len(ZONE_PALETTE)][0]
+
+
+def color_name(i: int) -> str:
+    """اسم اللون بالعربية — يُذكر مع رقم الزون حتى يميّزه الفني بلونه."""
+    return ZONE_PALETTE[i % len(ZONE_PALETTE)][2]
 
 
 def icon_for(i: int) -> str:
@@ -393,6 +398,7 @@ def build_zones(points: List[Dict[str, Any]], k: int, slack: float = 0.0,
             "name": (names or {}).get(str(c + 1), "").strip(),
             "color": color_for(c),
             "icon": icon_for(c),
+            "color_name": color_name(c),
             "count": len(members),
             "center": {"lat": lat_c, "lon": lon_c},
             "hull": [{"lat": y, "lon": x} for x, y in hull],

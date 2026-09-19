@@ -19,11 +19,12 @@ from typing import Any, Dict
 
 from flask import (
     Flask, request, redirect, url_for, render_template,
-    send_file, jsonify, abort,
+    send_file, jsonify, abort, Response,
 )
 
 import afterfill
 import builder
+import zones
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 JOBS_DIR = os.environ.get("JOBS_DIR", "/tmp/xlsx2pptx_web_jobs")
@@ -235,7 +236,13 @@ def job_download(job_id):
     state = read_state(d)
     if state.get("stage") != "done":
         abort(404)
-    feeder = (state.get("result") or {}).get("feeder") or "المغذي"
+    result = state.get("result") or {}
+    feeder = result.get("feeder") or "المغذي"
+    if result.get("is_zip"):
+        # التقارير الكبيرة تُبنى على أجزاء وتُسلَّم في ملف مضغوط
+        return send_file(state["output_path"], as_attachment=True,
+                         mimetype="application/zip",
+                         download_name=f"تقارير_{feeder}.zip")
     return send_file(state["output_path"], as_attachment=True,
                      download_name=f"تقرير_{feeder}.pptx")
 
@@ -385,6 +392,103 @@ def after_download(job_id):
         abort(404)
     return send_file(state["output_path"], as_attachment=True,
                      download_name="تقرير_الملاحظات_مع_صور_بعد.pptx")
+
+
+# --------------------------------------------------------------------------
+# تقسيم الملاحظات إلى زونات عمل
+# --------------------------------------------------------------------------
+
+@app.route("/zones", methods=["GET"])
+def zones_form():
+    return render_template("zones_new.html", max_zones=zones.MAX_ZONES)
+
+
+@app.route("/zones/start", methods=["POST"])
+def zones_start():
+    excel = request.files.get("excel_file")
+    try:
+        k = int(request.form.get("zones") or 4)
+    except ValueError:
+        k = 4
+    k = max(1, min(k, zones.MAX_ZONES))
+
+    if not excel or not excel.filename:
+        return render_template("zones_new.html", max_zones=zones.MAX_ZONES,
+                               error="الرجاء اختيار ملف الإكسل أولًا."), 400
+    if not excel.filename.lower().endswith((".xlsx", ".xlsm")):
+        return render_template("zones_new.html", max_zones=zones.MAX_ZONES,
+                               error="الملف يجب أن يكون بصيغة ‎.xlsx‎."), 400
+
+    job_id, d = new_job_dir()
+    excel_path = os.path.join(d, "input.xlsx")
+    excel.save(excel_path)
+
+    try:
+        with heavy_lock():
+            records, _mapping, _headers = builder.read_excel(excel_path)
+            points, skipped = zones.extract_points(records)
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(d, ignore_errors=True)
+        return render_template("zones_new.html", max_zones=zones.MAX_ZONES,
+                               error=f"تعذّرت قراءة الملف: {exc}"), 400
+    finally:
+        # لم نعد بحاجة للإكسل: النقاط وحدها تكفي لإعادة التقسيم بأي عدد
+        try:
+            os.remove(excel_path)
+        except OSError:
+            pass
+
+    if not points:
+        shutil.rmtree(d, ignore_errors=True)
+        return render_template("zones_new.html", max_zones=zones.MAX_ZONES,
+                               error="لا توجد إحداثيات صالحة في هذا الملف."), 400
+
+    write_state(d, {
+        "job_id": job_id,
+        "kind": "zones",
+        "points": points,
+        "skipped": skipped,
+        "feeder": builder.feeder_code(records),
+        "zones": k,
+        "created_at": time.time(),
+    })
+    return redirect(url_for("zones_map", job_id=job_id, k=k))
+
+
+def _zones_state(job_id):
+    d = job_dir(job_id)
+    state = read_state(d)
+    if state.get("kind") != "zones":
+        abort(404)
+    try:
+        k = int(request.args.get("k") or state.get("zones") or 4)
+    except ValueError:
+        k = 4
+    k = max(1, min(k, zones.MAX_ZONES, len(state["points"])))
+    return state, k
+
+
+@app.route("/job/<job_id>/zones")
+def zones_map(job_id):
+    state, k = _zones_state(job_id)
+    built = zones.build_zones(state["points"], k)
+    return render_template("zones_map.html", job_id=job_id, k=k,
+                           zones=built, feeder=state.get("feeder", ""),
+                           skipped=state.get("skipped", 0),
+                           total=len(state["points"]),
+                           max_zones=min(zones.MAX_ZONES, len(state["points"])))
+
+
+@app.route("/job/<job_id>/zones/kml")
+def zones_kml(job_id):
+    state, k = _zones_state(job_id)
+    built = zones.build_zones(state["points"], k)
+    feeder = state.get("feeder") or "المغذي"
+    kml = zones.build_kml(built, f"زونات {feeder}")
+    return Response(
+        kml, mimetype="application/vnd.google-earth.kml+xml",
+        headers={"Content-Disposition":
+                 f"attachment; filename*=UTF-8''%D8%B2%D9%88%D9%86%D8%A7%D8%AA.kml"})
 
 
 if __name__ == "__main__":

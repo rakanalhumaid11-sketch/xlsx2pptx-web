@@ -10,8 +10,10 @@
 from __future__ import annotations
 
 import datetime
+import gc
 import os
 import re
+import shutil
 import zipfile
 from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
@@ -345,13 +347,15 @@ def fill_cover(slide, feeder: str, date_text: str):
 
 
 def fill_summary(slide, feeder: str, notice: str, totals: Optional[Dict[str, int]],
-                 rows: List[Tuple[str, int]], continued: bool):
+                 rows: List[Tuple[str, int]], continued: bool, extra: str = ""):
     """يملأ شريحة ملخص واحدة. `rows` جزء الجدول الخاص بهذه الشريحة فقط.
 
     في شرائح التكملة نحذف مربعات الأرقام الثلاثة حتى لا تتكرر نفس القيم."""
     subtitle = f"صيانة مغذي: {feeder}" if feeder else "صيانة مغذي"
     if notice:
         subtitle += f"  |  رقم اشعار فحص : {notice}"
+    if extra:
+        subtitle += f"  |  {extra}"
     set_text(slide, "PH_SUM_SUBTITLE", subtitle)
     if continued:
         set_text(slide, "PH_SUM_HEADING", "ملخص الملاحظات (تابع)")
@@ -428,6 +432,55 @@ def fill_note(slide, rec: Dict[str, str], feeder: str, notice: str,
 
 # --------------------------------------------------------------- نقطة الدخول
 
+def _build_one(out_path: str, part_records: List[Dict[str, str]], feeder: str,
+               notice: str, counts: List[Tuple[str, int]], totals: Dict[str, int],
+               images: "ImageSource", part: Tuple[int, int],
+               progress_cb=None, offset: int = 0, grand_total: int = 0) -> Dict[str, int]:
+    """يبني ملفًا واحدًا لمجموعة ملاحظات، ويحفظه ثم يتركه للذاكرة أن تتحرر.
+
+    الملخص والأرقام تخصّ المغذي كاملًا في كل جزء (لا جزءه فقط)، لأنها حقيقة
+    واحدة عن المغذي؛ وما يختلف بين الأجزاء هو شرائح الملاحظات."""
+    prs = Presentation(TEMPLATE_PATH)
+    n_summary = max(1, (len(counts) + ROWS_PER_SUMMARY - 1) // ROWS_PER_SUMMARY)
+
+    part_no, part_count = part
+    label = f"الجزء {part_no} من {part_count}" if part_count > 1 else ""
+    date_text = today_ar() + (f" · {label}" if label else "")
+    fill_cover(prs.slides[IDX_COVER], feeder, date_text)
+
+    # شرائح الملخص: الأولى موجودة في القالب، والباقي نسخ منها
+    summary_indices = [IDX_SUMMARY]
+    for _ in range(n_summary - 1):
+        summary_indices.append(_dup(prs, IDX_SUMMARY))
+    for k, si in enumerate(summary_indices):
+        chunk = counts[k * ROWS_PER_SUMMARY:(k + 1) * ROWS_PER_SUMMARY]
+        fill_summary(prs.slides[si], feeder, notice, totals, chunk,
+                     continued=(k > 0), extra=label)
+
+    note_indices: List[int] = []
+    photos_ok = 0
+    total = len(part_records)
+    # نعالج على دفعات: ننزّل صور الدفعة بالتوازي ثم نبني شرائحها ونتخلص منها،
+    # فلا تتراكم الصور في الذاكرة مهما كان عدد الملاحظات.
+    for start in range(0, total, CHUNK):
+        chunk = part_records[start:start + CHUNK]
+        blobs = images.get_many([r.get("photo1", "") for r in chunk])
+        for j, rec in enumerate(chunk):
+            idx = _dup(prs, IDX_NOTE)
+            note_indices.append(idx)
+            img = blobs.get((rec.get("photo1", "") or "").strip())
+            if fill_note(prs.slides[idx], rec, feeder, notice, images, img=img):
+                photos_ok += 1
+            if progress_cb:
+                progress_cb(offset + start + j + 1, grand_total or total)
+        blobs.clear()
+
+    final_order = [IDX_COVER] + summary_indices + note_indices + [IDX_THANKS]
+    engine.rebuild_slide_order(prs, final_order, [IDX_NOTE])
+    prs.save(out_path)
+    return {"slides": len(final_order), "photos_ok": photos_ok, "summary_slides": n_summary}
+
+
 def build_report(excel_path: str, out_path: str, notice: str = "",
                  progress_cb=None) -> Dict[str, Any]:
     records, mapping, headers = read_excel(excel_path)
@@ -438,59 +491,60 @@ def build_report(excel_path: str, out_path: str, notice: str = "",
     counts = note_counts(records)
     totals = {"total": len(records), "types": len(counts), "done": 0}
 
-    prs = Presentation(TEMPLATE_PATH)
-    n_summary = max(1, (len(counts) + ROWS_PER_SUMMARY - 1) // ROWS_PER_SUMMARY)
+    # الخادم المجاني عنده ذاكرة محدودة (512 ميجا)، وكل شريحة تبقى في الذاكرة
+    # حتى يُحفظ الملف. لذلك نبني التقارير الكبيرة على أجزاء: كل جزء يُحفظ
+    # وتُحرَّر ذاكرته قبل أن يبدأ التالي، فتبقى الذروة ثابتة مهما كبر العدد.
+    max_per = max(1, int(os.environ.get("MAX_NOTES_PER_FILE", "250")))
+    n_parts = 1 if len(records) <= max_per else (len(records) + max_per - 1) // max_per
 
-    fill_cover(prs.slides[IDX_COVER], feeder, today_ar())
-
-    # شرائح الملخص: الأولى موجودة في القالب، والباقي نسخ منها
-    summary_indices = [IDX_SUMMARY]
-    for _ in range(n_summary - 1):
-        summary_indices.append(_dup(prs, IDX_SUMMARY))
-    for k, si in enumerate(summary_indices):
-        chunk = counts[k * ROWS_PER_SUMMARY:(k + 1) * ROWS_PER_SUMMARY]
-        fill_summary(prs.slides[si], feeder, notice, totals, chunk, continued=(k > 0))
-
-    # شريحة لكل ملاحظة
-    note_indices: List[int] = []
-    photos_ok = 0
-    total = len(records)
     images = ImageSource(excel_path)
     if progress_cb:
         # نُبلّغ مصدر الصور مبكرًا: القراءة من داخل الملف تستغرق ثوانٍ، أما
         # التنزيل من الإنترنت فدقائق — والمستخدم يجب أن يعرف الفرق بدل أن
         # يظن أن التوليد متوقف.
         embedded = sum(1 for r in records[:20] if r.get("photo1") in images.map)
-        progress_cb(0, total, "file" if embedded > 10 else "web")
+        progress_cb(0, len(records), "file" if embedded > 10 else "web")
 
+    work_dir = os.path.join(os.path.dirname(out_path), "parts")
+    produced: List[str] = []
+    slides_total, photos_ok, n_summary = 0, 0, 1
     try:
-        # نعالج على دفعات: ننزّل صور الدفعة بالتوازي ثم نبني شرائحها ونتخلص
-        # منها، فلا تتراكم الصور في الذاكرة مهما كان عدد الملاحظات.
-        for start in range(0, total, CHUNK):
-            chunk = records[start:start + CHUNK]
-            blobs = images.get_many([r.get("photo1", "") for r in chunk])
-            for j, rec in enumerate(chunk):
-                idx = _dup(prs, IDX_NOTE)
-                note_indices.append(idx)
-                img = blobs.get((rec.get("photo1", "") or "").strip())
-                if fill_note(prs.slides[idx], rec, feeder, notice, images, img=img):
-                    photos_ok += 1
-                if progress_cb:
-                    progress_cb(start + j + 1, total)
-            blobs.clear()
+        if n_parts == 1:
+            st = _build_one(out_path, records, feeder, notice, counts, totals,
+                            images, (1, 1), progress_cb, 0, len(records))
+            slides_total, photos_ok, n_summary = st["slides"], st["photos_ok"], st["summary_slides"]
+            produced.append(out_path)
+        else:
+            os.makedirs(work_dir, exist_ok=True)
+            for i in range(n_parts):
+                part_records = records[i * max_per:(i + 1) * max_per]
+                name = f"تقرير_{feeder or 'المغذي'}_جزء{i + 1}.pptx"
+                path = os.path.join(work_dir, name)
+                st = _build_one(path, part_records, feeder, notice, counts, totals,
+                                images, (i + 1, n_parts), progress_cb,
+                                i * max_per, len(records))
+                slides_total += st["slides"]
+                photos_ok += st["photos_ok"]
+                n_summary = st["summary_slides"]
+                produced.append(path)
+                gc.collect()   # نحرّر ذاكرة الجزء قبل بدء التالي
     finally:
         images.close()
 
-    final_order = [IDX_COVER] + summary_indices + note_indices + [IDX_THANKS]
-    drop_indices = [IDX_NOTE]
-    engine.rebuild_slide_order(prs, final_order, drop_indices)
-    prs.save(out_path)
+    is_zip = len(produced) > 1
+    if is_zip:
+        with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as z:
+            for p in produced:
+                z.write(p, os.path.basename(p))
+        shutil.rmtree(work_dir, ignore_errors=True)
 
     return {
         "records": len(records),
         "types": len(counts),
-        "slides": len(final_order),
+        "slides": slides_total,
         "summary_slides": n_summary,
+        "parts": len(produced),
+        "is_zip": is_zip,
         "photos_ok": photos_ok,
         "photos_missing": len(records) - photos_ok,
         "photos_from_file": images.from_file,

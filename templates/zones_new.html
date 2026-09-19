@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+
+  <div class="page-head">
+    <h1>زونات العمل</h1>
+    <p>قسّم ملاحظات المغذي إلى مناطق متجاورة لتوزيعها على الفرق.</p>
+  </div>
+
+  {% if error %}<div class="errors">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ url_for('zones_start') }}" enctype="multipart/form-data">
+
+    <label class="dropzone" id="zone" for="excel_file">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 16V4"></path>
+        <path d="m7 9 5-5 5 5"></path>
+        <path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"></path>
+      </svg>
+      <span class="dz-title" id="dzTitle">اسحب ملف الإكسل هنا</span>
+      <span class="dz-hint" id="dzHint">أو اضغط للاختيار — يحتاج عمودي خط الطول وخط العرض</span>
+    </label>
+    <input class="hidden-input" id="excel_file" type="file" name="excel_file" accept=".xlsx,.xlsm" required>
+
+    <label class="field">
+      <span class="field-label">عدد الزونات</span>
+      <input type="number" name="zones" value="4" min="1" max="{{ max_zones }}" inputmode="numeric">
+      <span class="hint">تقدر تغيّره بعد ظهور الخريطة دون إعادة رفع الملف.</span>
+    </label>
+
+    <button class="btn" type="submit">تقسيم ورسم الخريطة</button>
+  </form>
+
+</div>
+
+<script>
+(function () {
+  var input = document.getElementById("excel_file");
+  var zone = document.getElementById("zone");
+  var title = document.getElementById("dzTitle");
+  var hint = document.getElementById("dzHint");
+
+  function show() {
+    if (input.files && input.files.length) {
+      var f = input.files[0];
+      zone.classList.add("filled");
+      title.textContent = f.name;
+      hint.textContent = (f.size / 1048576).toFixed(1) + " ميجابايت — جاهز للرفع";
+    }
+  }
+  input.addEventListener("change", show);
+  ["dragenter", "dragover"].forEach(function (e) {
+    zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.add("drag"); });
+  });
+  ["dragleave", "drop"].forEach(function (e) {
+    zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.remove("drag"); });
+  });
+  zone.addEventListener("drop", function (ev) {
+    if (ev.dataTransfer && ev.dataTransfer.files.length) { input.files = ev.dataTransfer.files; show(); }
+  });
+})();
+</script>
+{% endblock %}

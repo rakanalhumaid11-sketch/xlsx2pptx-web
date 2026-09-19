@@ -70,9 +70,13 @@ function poll() {
     if (data.stage === "done") {
       var r = data.result || {};
       document.getElementById("statusTitle").textContent = "التقرير جاهز";
-      document.getElementById("statusHint").textContent = "نزّله الآن — تُحذف الملفات من الخادم تلقائيًا بعد ساعات قليلة.";
+      document.getElementById("statusHint").textContent = r.is_zip
+        ? "قُسّم التقرير إلى " + r.parts + " ملفات داخل ملف مضغوط. نزّله الآن — تُحذف الملفات من الخادم تلقائيًا بعد ساعات قليلة."
+        : "نزّله الآن — تُحذف الملفات من الخادم تلقائيًا بعد ساعات قليلة.";
       document.getElementById("liveBox").style.display = "none";
-      document.getElementById("downloadLink").href = "/job/" + jobId + "/download";
+      var dl = document.getElementById("downloadLink");
+      dl.href = "/job/" + jobId + "/download";
+      if (r.is_zip) { dl.textContent = "تحميل التقارير (مضغوطة)"; }
       document.getElementById("stats").innerHTML =
         "<li><span>المغذي</span><b>" + (r.feeder || "—") + "</b></li>" +
         "<li><span>عدد الملاحظات</span><b>" + (r.records || 0) + "</b></li>" +

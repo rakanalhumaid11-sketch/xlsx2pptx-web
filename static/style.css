@@ -341,3 +341,62 @@ select { cursor: pointer; }
   .brand span { display: none; }
   .nav a svg { display: none; }
 }
+
+/* ------------------------------------------------------------ زونات العمل */
+
+.zone-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.zone-bar .field-label { margin: 0; white-space: nowrap; }
+.zone-bar input[type="number"] {
+  width: 90px;
+  min-height: 46px;
+  padding: 0 12px;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 300;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+}
+.zone-bar .btn { margin-top: 0; min-height: 46px; padding: 0 20px; font-size: 15px; }
+
+#map {
+  height: 520px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.leaflet-popup-content { font-family: inherit; font-size: 13px; line-height: 1.7; }
+.leaflet-container { font-family: inherit; }
+
+.zone-legend {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 0;
+}
+.zone-legend li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.zone-legend .swatch {
+  flex: none; width: 14px; height: 14px; border-radius: 4px;
+}
+.zone-legend .zname { font-size: 14px; font-weight: 500; }
+.zone-legend .zmeta { font-size: 12px; color: var(--muted); margin-inline-start: auto; }
+
+input[type="number"] { -moz-appearance: textfield; }

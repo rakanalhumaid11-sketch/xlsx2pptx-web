@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+
+<div class="wrap-wide">
+
+  <div class="page-head">
+    <h1>زونات العمل{% if feeder %} — {{ feeder }}{% endif %}</h1>
+    <p>{{ total }} ملاحظة موزّعة على {{ zones|length }} زون{% if skipped %} · {{ skipped }} بلا إحداثيات{% endif %}</p>
+  </div>
+
+  <form class="zone-bar" method="get" action="{{ url_for('zones_map', job_id=job_id) }}">
+    <label class="field-label" for="k">عدد الزونات</label>
+    <input id="k" type="number" name="k" value="{{ k }}" min="1" max="{{ max_zones }}" inputmode="numeric">
+    <button class="btn btn-ghost" type="submit">أعد التقسيم</button>
+    <a class="btn" href="{{ url_for('zones_kml', job_id=job_id, k=k) }}">تحميل ملف قوقل مابس</a>
+  </form>
+
+  <div id="map"></div>
+
+  <ul class="zone-legend">
+    {% for z in zones %}
+    <li>
+      <span class="swatch" style="background: {{ z.color }}"></span>
+      <span class="zname">زون {{ z.index }}</span>
+      <span class="zmeta">{{ z.count }} ملاحظة · امتداد {{ z.span_km }} كم</span>
+    </li>
+    {% endfor %}
+  </ul>
+
+  <p class="hint">
+    لفتح الزونات في خرائط قوقل: نزّل الملف، ثم افتح <span dir="ltr">google.com/mymaps</span>،
+    أنشئ خريطة جديدة واضغط «استيراد» واختر الملف.
+  </p>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+var ZONES = {{ zones|tojson }};
+
+var map = L.map("map", { scrollWheelZoom: true });
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: "&copy; OpenStreetMap"
+}).addTo(map);
+
+var bounds = [];
+
+ZONES.forEach(function (z) {
+  if (z.hull && z.hull.length >= 3) {
+    L.polygon(z.hull.map(function (p) { return [p.lat, p.lon]; }), {
+      color: z.color, weight: 2, fillColor: z.color, fillOpacity: 0.12
+    }).addTo(map);
+  }
+  z.points.forEach(function (p) {
+    bounds.push([p.lat, p.lon]);
+    L.circleMarker([p.lat, p.lon], {
+      radius: 6, color: "#0F1620", weight: 1,
+      fillColor: z.color, fillOpacity: 0.95
+    }).addTo(map).bindPopup(
+      "<b>زون " + z.index + "</b><br>" +
+      (p.note_id ? "رقم الملاحظة: " + p.note_id + "<br>" : "") +
+      (p.note || "") + "<br>" +
+      '<a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' +
+      p.lat + "," + p.lon + '">فتح في خرائط قوقل</a>'
+    );
+  });
+});
+
+if (bounds.length) { map.fitBounds(bounds, { padding: [30, 30] }); }
+else { map.setView([24.7, 46.7], 6); }
+</script>
+{% endblock %}

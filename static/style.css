@@ -620,3 +620,8 @@ input[type="number"] { -moz-appearance: textfield; }
   padding: 0 18px;
   font-size: 14px;
 }
+
+.kpi-row.kpi-5 { grid-template-columns: repeat(5, 1fr); }
+.rule-one { grid-template-columns: 1fr; }
+@media (max-width: 900px) { .kpi-row.kpi-5 { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 720px) { .kpi-row.kpi-5 { grid-template-columns: repeat(2, 1fr); } }

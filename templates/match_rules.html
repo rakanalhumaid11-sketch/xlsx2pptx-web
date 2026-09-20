@@ -9,9 +9,10 @@
 
   {% if error %}<div class="errors">{{ error }}</div>{% endif %}
 
-  <div class="kpi-row">
+  <div class="kpi-row kpi-5">
     <div class="kpi"><span class="kpi-num">{{ total }}</span><span class="kpi-lbl">إجمالي الملاحظات</span></div>
     <div class="kpi ok"><span class="kpi-num">{{ done }}</span><span class="kpi-lbl">منفّذة</span></div>
+    <div class="kpi"><span class="kpi-num">{{ wip }}</span><span class="kpi-lbl">جاري العمل</span></div>
     <div class="kpi"><span class="kpi-num">{{ remaining }}</span><span class="kpi-lbl">متبقية</span></div>
     <div class="kpi"><span class="kpi-num">{{ percent }}%</span><span class="kpi-lbl">نسبة الإنجاز</span></div>
   </div>
@@ -30,21 +31,45 @@
 
   <form method="post" action="{{ url_for('match_build', job_id=job_id) }}">
 
-    <h2 class="sec-title">قواعد التلوين</h2>
-    <p class="sec-note">أول قاعدة تنطبق على الصف هي التي تلوّنه، فرتّب الأهم في الأعلى.</p>
+    <h2 class="sec-title">حالة الملاحظات الواردة في ملفات التنفيذ</h2>
+    <p class="sec-note">
+      {{ n_found }} ملاحظة من الملف الرئيسي وردت في ملفات التنفيذ.
+      {% if an.sec_has_status %}وُجد في ملفات التنفيذ عمود حالة، فالأصل أن نقرأه.{% endif %}
+    </p>
 
+    <div class="rule rule-one">
+      <select name="sec_status_mode" aria-label="حالة الملاحظات الواردة في ملفات التنفيذ">
+        {% if an.sec_has_status %}
+        <option value="column" {% if sec_mode == 'column' %}selected{% endif %}>
+          اقرأ الحالة من عمود الحالة في ملف التنفيذ — وما لم تُذكر له حالة يُعدّ «لم ينفذ»
+        </option>
+        {% endif %}
+        <option value="done" {% if sec_mode == 'done' %}selected{% endif %}>تمت المعالجة لكامل الملاحظات — كلها «منفذ»</option>
+        <option value="wip">كلها «جاري العمل»</option>
+      </select>
+    </div>
+
+    <h2 class="sec-title">قواعد التلوين</h2>
+    <p class="sec-note">
+      أول قاعدة تنطبق على الصف هي التي تلوّنه، فرتّب الأهم في الأعلى.
+      التلوين حيّ: لو غيّرت حالة صف بيدك داخل إكسل، تغيّر لونه وتحدّث الداتا شيت فورًا.
+    </p>
+
+    {% for st in states %}
     <div class="rule rule-fixed">
-      <span class="rule-tag">الملاحظات المنفّذة</span>
+      <span class="rule-tag">{{ st }}</span>
       <span class="color-pick">
         <i class="sw" data-sw></i>
-        <select name="done_color" class="rule-color" aria-label="لون الملاحظات المنفذة">
+        <select name="state_color_{{ st }}" class="rule-color" aria-label="لون حالة {{ st }}">
           {% for key, name, hex in colors %}
-          <option value="{{ key }}" data-hex="#{{ hex }}" {% if key == 'green' %}selected{% endif %}>{{ name }}</option>
+          <option value="{{ key }}" data-hex="#{{ hex }}"
+            {%- if key == state_color[st] %} selected{% endif %}>{{ name }}</option>
           {% endfor %}
-          <option value="none" data-hex="">بدون لون</option>
+          <option value="none" data-hex="" {% if state_color[st] == 'none' %}selected{% endif %}>بدون لون</option>
         </select>
       </span>
     </div>
+    {% endfor %}
 
     {% for i in range(1, max_rules + 1) %}
     <div class="rule" data-rule="{{ i }}" {% if i > 2 %}hidden{% endif %}>
@@ -69,28 +94,36 @@
     <button class="btn btn-ghost btn-small" type="button" id="addRule">أضف قاعدة أخرى</button>
 
     <h2 class="sec-title">الداتا شيت</h2>
-    <p class="sec-note">ورقة مستقلة داخل الملف: الإنجاز الإجمالي، وتوزيعه حسب العمودين التاليين.</p>
+    <p class="sec-note">ورقة مستقلة داخل الملف: الإنجاز الإجمالي ونسبته، ثم توزيعه حسب التصنيف وحسب المقاول.</p>
 
     <div class="rule rule-two">
       <label class="rule-lbl">عمود التصنيف
         <select name="class_col">
-          <option value="">— بدون —</option>
+          <option value="">— بدون — (ألغِ الجدول)</option>
           {% for c in columns %}
           <option value="{{ c.i }}" {% if c.i == an.class_col %}selected{% endif %}>{{ c.name }}</option>
           {% endfor %}
         </select>
       </label>
-      <label class="rule-lbl">عمود المقاول
-        <select name="contractor_col">
-          <option value="">— بدون —</option>
-          {% for c in columns %}
-          <option value="{{ c.i }}" {% if c.i == an.contractor_col %}selected{% endif %}>{{ c.name }}</option>
-          {% endfor %}
+      <label class="rule-lbl">جدول المقاول
+        <select name="contractor_mode">
+          <option value="column">اعرضه{% if an.contractor_col is not none %} — من عمود «{{ an.headers[an.contractor_col] }}»{% endif %}</option>
+          <option value="none">— بدون — (ألغِ الجدول)</option>
         </select>
       </label>
     </div>
 
     <h2 class="sec-title">خيارات</h2>
+
+    <label class="check">
+      <input type="checkbox" name="move_contractor" checked>
+      <span>
+        انقل اسم المقاول من ملفات التنفيذ إلى الملف الرئيسي
+        {%- if n_sec_contractor %} ({{ n_sec_contractor }} ملاحظة فيها اسم مقاول){% endif %}
+        {%- if an.contractor_col is none %} — لا يوجد عمود مقاول في ملفك، فسيُنشأ عمود جديد في آخره
+        {%- else %} — يُكتب في الخلايا الفارغة فقط ولا يُستبدل اسم مكتوب{% endif %}
+      </span>
+    </label>
 
     <label class="check">
       <input type="checkbox" name="source_col" checked>
@@ -103,6 +136,11 @@
       <span>غيّر عمود «{{ an.headers[an.status_col] }}» إلى «منجز» للملاحظات المنفّذة فقط</span>
     </label>
     {% endif %}
+
+    <p class="sec-note" style="margin-top: 16px">
+      ملفك الأصلي يُنسخ كما هو — بصوره وتنسيقاته وعروض أعمدته وأوراقه الأخرى — ولا يُضاف إليه
+      إلا تلوين الصفوف وهذه الأعمدة في آخره.
+    </p>
 
     <button class="btn" type="submit">أنشئ ملف المتابعة</button>
   </form>

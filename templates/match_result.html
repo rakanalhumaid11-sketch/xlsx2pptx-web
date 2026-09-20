@@ -7,21 +7,29 @@
     <p>الملاحظات المنفّذة معلَّمة وملوّنة، ومعها ورقة «الداتا شيت».</p>
   </div>
 
-  <div class="kpi-row">
+  <div class="kpi-row kpi-5">
     <div class="kpi"><span class="kpi-num">{{ r.total }}</span><span class="kpi-lbl">إجمالي</span></div>
     <div class="kpi ok"><span class="kpi-num">{{ r.done }}</span><span class="kpi-lbl">منفّذة</span></div>
+    <div class="kpi"><span class="kpi-num">{{ r.wip }}</span><span class="kpi-lbl">جاري العمل</span></div>
     <div class="kpi"><span class="kpi-num">{{ r.remaining }}</span><span class="kpi-lbl">متبقية</span></div>
     <div class="kpi"><span class="kpi-num">{{ r.percent }}%</span><span class="kpi-lbl">نسبة الإنجاز</span></div>
   </div>
 
   <ul class="stats">
-    <li><span>أوراق الملف</span><b>الملاحظات · الداتا شيت{% if r.alerts %} · تنبيهات{% endif %}</b></li>
+    <li><span>صفوف تلوّنت</span><b>{{ r.colored }}</b></li>
+    {% if r.new_cols %}<li><span>أعمدة أُضيفت في آخر الملف</span><b>{{ r.new_cols|join(' · ') }}</b></li>{% endif %}
+    {% if r.contractors_moved %}<li><span>أسماء مقاولين نُقلت من ملفات التنفيذ</span><b>{{ r.contractors_moved }}</b></li>{% endif %}
+    {% if r.carried %}<li><span>محسوبة من جولة سابقة</span><b>{{ r.carried }}</b></li>{% endif %}
     {% if r.missing %}<li><span>أرقام بلا مقابل في الملف الرئيسي</span><b>{{ r.missing }}</b></li>{% endif %}
     {% if r.dups %}<li><span>أرقام مكررة في الملف الرئيسي</span><b>{{ r.dups }}</b></li>{% endif %}
+    <li><span>أوراق أُضيفت</span><b>الداتا شيت{% if r.alerts %} · تنبيهات{% endif %}</b></li>
   </ul>
 
   <a class="btn" href="{{ url_for('match_download', job_id=job_id) }}">تحميل ملف المتابعة</a>
-  <span class="hint">الملف الناتج ملف متابعة بالقيم فقط — احتفظ بملفك الأصلي لتوليد تقارير البوربوينت.</span>
+  <span class="hint">
+    الملف نسخة من ملفك الأصلي: صوره وتنسيقاته وعروض أعمدته وأوراقه الأخرى كما هي.
+    وعمود «حالة التنفيذ» فيه قائمة منسدلة — غيّر حالة أي صف بيدك، فيتغيّر لونه ويتحدّث الداتا شيت تلقائيًا.
+  </span>
 
   <p style="margin-top: 26px">
     <a class="back-link" href="{{ url_for('match_rules', job_id=job_id) }}">رجوع لتعديل الألوان والخيارات</a>

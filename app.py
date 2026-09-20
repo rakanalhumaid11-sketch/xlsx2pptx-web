@@ -666,14 +666,11 @@ def match_start():
         "job_id": job_id,
         "kind": "match",
         "stem": stem,
+        "main_path": main_path,
         "sec_names": an["sec_names"],
         "created_at": time.time(),
     })
-    # الملفات الخام لم نعد بحاجتها: التحليل محفوظ كاملًا
-    try:
-        os.remove(main_path)
-    except OSError:
-        pass
+    # الملف الرئيسي يبقى: المخرج نسخة منه بالضبط لا ملف مبنيّ من جديد
     shutil.rmtree(sec_dir, ignore_errors=True)
 
     return redirect(url_for("match_rules", job_id=job_id))
@@ -684,17 +681,25 @@ def match_rules(job_id):
     d, state = _match_state(job_id)
     an = _load_analysis(d)
     total = an["total"]
-    done = len(an["matched"])
+    mode = "column" if an.get("sec_has_status") else "done"
+    states = matcher.resolve_states(an, mode)
+    done = states.count(matcher.ST_DONE)
+    wip = states.count(matcher.ST_WIP)
     columns = [{"i": i, "name": h} for i, h in enumerate(an["headers"]) if h]
     return render_template(
         "match_rules.html", job_id=job_id, state=state, an=an,
-        total=total, done=done, remaining=total - done,
+        total=total, done=done, wip=wip, remaining=total - done - wip,
         percent=round(100.0 * done / total, 1) if total else 0.0,
-        columns=columns,
+        columns=columns, sec_mode=mode, states=matcher.EXEC_STATES,
+        state_color={matcher.ST_DONE: "green", matcher.ST_WIP: "yellow",
+                     matcher.ST_NONE: "none"},
+        n_found=an.get("n_found", 0),
         distinct={str(k): v for k, v in an["distinct"].items()},
         colors=matcher.COLORS, max_rules=matcher.MAX_RULES,
         n_missing=len(an["missing"]), n_dups=len(an["dups"]),
         has_status=an.get("status_col") is not None,
+        sec_has_contractor=an.get("sec_has_contractor", False),
+        n_sec_contractor=len(an.get("sec_contractor") or {}),
     )
 
 
@@ -704,32 +709,43 @@ def match_build(job_id):
     an = _load_analysis(d)
 
     rules = []
-    done_color = request.form.get("done_color") or ""
-    if done_color in matcher.COLOR_HEX:
-        rules.append({"col": -1, "value": "", "color": done_color})
+    for exec_state in matcher.EXEC_STATES:
+        color = request.form.get("state_color_" + exec_state) or ""
+        if color in matcher.COLOR_HEX:
+            rules.append({"kind": "state", "key": exec_state, "color": color})
     for i in range(1, matcher.MAX_RULES + 1):
         col = request.form.get(f"rule_col_{i}") or ""
         val = (request.form.get(f"rule_val_{i}") or "").strip()
         color = request.form.get(f"rule_color_{i}") or ""
         if not col or not val or color not in matcher.COLOR_HEX:
             continue
-        rules.append({"col": _int_ar(col, -2), "value": val, "color": color})
+        rules.append({"kind": "column", "key": _int_ar(col, -1),
+                      "value": val, "color": color})
 
-    # المستخدم قد يصحّح عمودي التصنيف والمقاول إن أخطأ الاستنتاج التلقائي
-    for key in ("class_col", "contractor_col"):
-        raw = request.form.get(key)
-        if raw not in (None, ""):
-            an[key] = _int_ar(raw, -1)
-            if an[key] < 0 or an[key] >= len(an["headers"]):
-                an[key] = None
+    # المستخدم قد يصحّح عمود التصنيف إن أخطأ الاستنتاج التلقائي
+    raw = request.form.get("class_col")
+    if raw is not None:
+        an["class_col"] = _int_ar(raw, -1) if raw != "" else -1
+        if an["class_col"] < 0 or an["class_col"] >= len(an["headers"]):
+            an["class_col"] = None
+
+    contractor_mode = request.form.get("contractor_mode") or "column"
+
+    src = state.get("main_path") or ""
+    if not os.path.exists(src):
+        return render_template("match_rules.html", job_id=job_id, state=state, an=an,
+                               error="انتهت صلاحية الجلسة — أعد رفع الملفات."), 410
 
     out_path = os.path.join(d, "output.xlsx")
     try:
         with heavy_lock():
             result = matcher.build_output(
-                an, rules, out_path,
+                an, rules, src, out_path,
                 set_status_done=bool(request.form.get("status_done")),
                 add_source_col=bool(request.form.get("source_col")),
+                move_contractor=bool(request.form.get("move_contractor")),
+                contractor_mode=contractor_mode,
+                sec_status_mode=request.form.get("sec_status_mode") or "done",
             )
     except Exception as exc:  # noqa: BLE001
         return render_template("match_rules.html", job_id=job_id, state=state, an=an,

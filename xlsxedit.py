@@ -86,7 +86,10 @@ class Styles:
         for child, cont in self.CHILD_OF.items():
             inner = self._inner(cont)
             self.base[child] = len(re.findall(r"<%s\b" % child, inner))
+        self._xfs = re.findall(r"<xf\b[^>]*/>|<xf\b[^>]*>.*?</xf>",
+                               self._inner("cellXfs"), re.S)
         self._fill_cache: Dict[str, int] = {}
+        self._tinted: Dict[Tuple[int, str], int] = {}
         self._next_numfmt = self._max_numfmt() + 1
 
     # ---- قراءة
@@ -167,6 +170,25 @@ class Styles:
             ' applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"'
             ' applyAlignment="1">%s</xf>' % (numfmt, font, fill, border, align))
         return self.base["xf"] + len(self.added["xf"]) - 1
+
+    def tinted(self, base_xf: int, hex_rgb: str) -> int:
+        """نمط جديد = نمط الخلية الأصلي نفسه مع تغيير لون التعبئة وحده.
+
+        هكذا يحتفظ الصف بخطه وحدوده وتنسيق أرقامه كما كان."""
+        key = (base_xf, hex_rgb.upper())
+        if key in self._tinted:
+            return self._tinted[key]
+        src = (self._xfs[base_xf] if 0 <= base_xf < len(self._xfs)
+               else '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+        head = src if "</xf>" not in src else src[:src.index(">") + 1]
+        new = _set_attr(head, "fillId", str(self.fill(hex_rgb)))
+        new = _set_attr(new, "applyFill", "1")
+        if "</xf>" in src:                       # نمط له عنصر محاذاة داخلي
+            new += src[src.index(">") + 1:]
+        self.added["xf"].append(new)
+        idx = self.base["xf"] + len(self.added["xf"]) - 1
+        self._tinted[key] = idx
+        return idx
 
     def dxf_fill(self, hex_rgb: str) -> int:
         """تنسيق شرطي: تعبئة فقط. (في dxf يكون اللون في bgColor لا fgColor.)"""
@@ -426,8 +448,13 @@ def add_list_validation(sheet_xml: str, sqref: str, options: List[str]) -> str:
 
 def patch_sheet(sheet_xml: str, styles: Styles, *, header_row: int, n_cols: int,
                 cell_values: Dict[Tuple[int, int], Any],
-                new_columns: List[Tuple[str, Dict[int, Any]]]) -> str:
-    """يكتب قيمًا ويضيف أعمدة في آخر الورقة — ولا يمسّ أي خلية أخرى."""
+                new_columns: List[Tuple[str, Dict[int, Any]]],
+                row_fills: Optional[Dict[int, str]] = None) -> str:
+    """يكتب قيمًا ويضيف أعمدة في آخر الورقة، ويلوّن صفوفًا بعينها.
+
+    التلوين هنا ثابت لأنه يخصّ صفوفًا محدّدة بأعيانها (ما طابق ملفات التنفيذ)
+    لا شرطًا في البيانات؛ أما التلوين حسب الحالة فتنسيق شرطي حيّ."""
+    row_fills = row_fills or {}
     n_new = len(new_columns)
     total_cols = n_cols + n_new
 
@@ -485,6 +512,19 @@ def patch_sheet(sheet_xml: str, styles: Styles, *, header_row: int, n_cols: int,
                 base = _cell_style(cells[c]) if c in cells else None
                 cells[c] = _text_cell("%s%d" % (col_letter(c), rn), base, vals[rn])
                 touched = True
+
+        fill = row_fills.get(rn)
+        if fill and rn > header_row:
+            for c in range(total_cols):
+                base = _cell_style(cells[c]) if c in cells else 0
+                new_s = styles.tinted(base, fill)
+                if c in cells:
+                    cut = cells[c].index(">") + 1      # يشمل علامة الإغلاق
+                    cells[c] = (_set_attr(cells[c][:cut], "s", str(new_s))
+                                + cells[c][cut:])
+                else:
+                    cells[c] = '<c r="%s%d" s="%d"/>' % (col_letter(c), rn, new_s)
+            touched = True
 
         if touched:
             open_tag = _set_attr(open_tag, "spans", "1:%d" % total_cols)
@@ -565,6 +605,7 @@ def write_patched(src_path: str, dst_path: str, *, sheet_name: str,
                   header_row: int, n_cols: int,
                   cell_values: Dict[Tuple[int, int], Any],
                   new_columns: List[Tuple[str, Dict[int, Any]]],
+                  row_fills: Optional[Dict[int, str]] = None,
                   cf: Optional[Tuple[str, List[Tuple[str, str]]]] = None,
                   validation: Optional[Tuple[str, List[str]]] = None,
                   sheets_factory=None) -> None:
@@ -585,7 +626,7 @@ def write_patched(src_path: str, dst_path: str, *, sheet_name: str,
 
         sheet_xml = patch_sheet(
             sheet_xml, styles, header_row=header_row, n_cols=n_cols,
-            cell_values=cell_values, new_columns=new_columns)
+            cell_values=cell_values, new_columns=new_columns, row_fills=row_fills)
         if validation:
             sheet_xml = add_list_validation(sheet_xml, validation[0], validation[1])
         if cf:

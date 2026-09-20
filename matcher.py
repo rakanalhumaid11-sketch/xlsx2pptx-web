@@ -358,33 +358,42 @@ def _q(text: str) -> str:
     return '"%s"' % str(text).replace('"', '""')
 
 
-def rule_matches(row: List[Any], state: str, rule: Dict[str, Any]) -> bool:
-    if rule.get("kind") == "state":
-        return state == rule.get("key")
-    col = rule.get("key")
-    if not isinstance(col, int) or col < 0 or col >= len(row):
-        return False
-    want = engine.normalize_ar(rule.get("value") or "")
-    return bool(want) and engine.normalize_ar(_clean(row[col])) == want
+def state_cf_rules(rules: List[Dict[str, Any]], first_row: int,
+                   exec_letter: str) -> List[Tuple[str, str]]:
+    """ألوان الحالة كصيغ تنسيق شرطي — يتغيّر اللون فور تعديل المستخدم للخلية.
 
-
-def cf_rules(rules: List[Dict[str, Any]], first_row: int, exec_letter: str,
-             headers: List[str]) -> List[Tuple[str, str]]:
-    """قواعد المستخدم كصيغ تنسيق شرطي — تُعاد الحسبة فور تعديله للخلية بيده."""
+    وهي تعلو على تلوين قواعد الأعمدة: الصف المنفَّذ يظهر بلون حالته."""
     out: List[Tuple[str, str]] = []
     for rule in rules:
-        color = COLOR_HEX.get(rule.get("color") or "")
-        if not color:
+        if rule.get("kind") != "state":
             continue
-        if rule.get("kind") == "state":
-            formula = "$%s%d=%s" % (exec_letter, first_row, _q(rule["key"]))
-        else:
-            col = rule.get("key")
-            value = (rule.get("value") or "").strip()
-            if not isinstance(col, int) or not value or col >= len(headers):
+        color = COLOR_HEX.get(rule.get("color") or "")
+        if color:
+            out.append(("$%s%d=%s" % (exec_letter, first_row, _q(rule["key"])), color))
+    return out
+
+
+def column_fills(rules: List[Dict[str, Any]], rows: List[List[Any]],
+                 row_nums: List[int], matched: set) -> Dict[int, str]:
+    """قواعد الأعمدة تلوّن الصفوف التي وردت في ملفات التنفيذ **وحدها**.
+
+    تلوين كل صفوف الملف التي تحمل القيمة يُفقد التقرير معناه: المقصود تمييز
+    ما سُلّم للفرق فعلًا، لا كل ما في الملف."""
+    out: Dict[int, str] = {}
+    for i, r in enumerate(rows):
+        if i not in matched:
+            continue
+        for rule in rules:
+            if rule.get("kind") == "state":
                 continue
-            formula = "$%s%d=%s" % (xlsxedit.col_letter(col), first_row, _q(value))
-        out.append((formula, color))
+            color = COLOR_HEX.get(rule.get("color") or "")
+            col = rule.get("key")
+            want = engine.normalize_ar(rule.get("value") or "")
+            if not color or not want or not isinstance(col, int) or col >= len(r):
+                continue
+            if engine.normalize_ar(_clean(r[col])) == want:
+                out[row_nums[i]] = color
+                break              # أول قاعدة تنطبق هي التي تلوّن
     return out
 
 
@@ -696,19 +705,22 @@ def build_output(an: Dict[str, Any], rules: List[Dict[str, Any]],
 
     total_cols = n_cols + len(new_columns)
     sqref = "A%d:%s%d" % (first_row, xlsxedit.col_letter(total_cols - 1), last_row)
+    matched = set(an["sources"])          # ما ورد في ملفات التنفيذ (الآن أو سابقًا)
+    fills = column_fills(rules, rows, nums, matched)
 
     xlsxedit.write_patched(
         src_path, out_path,
         sheet_name=an["sheet"], header_row=an["header_row"], n_cols=n_cols,
-        cell_values=cell_values, new_columns=new_columns,
-        cf=(sqref, cf_rules(rules, first_row, exec_letter, headers)),
+        cell_values=cell_values, new_columns=new_columns, row_fills=fills,
+        cf=(sqref, state_cf_rules(rules, first_row, exec_letter)),
         validation=("%s%d:%s%d" % (exec_letter, first_row, exec_letter, last_row),
                     EXEC_STATES),
         sheets_factory=sheets_factory)
 
-    colored = sum(1 for i, r in enumerate(rows)
-                  if any(rule_matches(r, states[i], rule) for rule in rules
-                         if COLOR_HEX.get(rule.get("color") or "")))
+    colored_states = {r["key"] for r in rules if r.get("kind") == "state"
+                      and COLOR_HEX.get(r.get("color") or "")}
+    colored = len(set(fills) | {nums[i] for i, st in enumerate(states)
+                                if st in colored_states})
     n_done = states.count(ST_DONE)
     n_wip = states.count(ST_WIP)
     return {

@@ -11,6 +11,7 @@ import contextlib
 import fcntl
 import json
 import os
+import pickle
 import shutil
 import threading
 import time
@@ -24,6 +25,7 @@ from flask import (
 
 import afterfill
 import builder
+import matcher
 import zones
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -590,6 +592,171 @@ def zones_kml(job_id):
     feeder = state.get("feeder") or "المغذي"
     title = f"زونات {feeder}"
     return _kml_response(zones.build_kml(built, title), title)
+
+
+# --------------------------------------------------------------------------
+# مطابقة الأعمال المنفّذة: ملف رئيسي + ملفات تنفيذ ثانوية
+# --------------------------------------------------------------------------
+
+def _match_state(job_id):
+    d = job_dir(job_id)
+    state = read_state(d)
+    if state.get("kind") != "match":
+        abort(404)
+    return d, state
+
+
+def _load_analysis(d):
+    with open(os.path.join(d, "analysis.pkl"), "rb") as f:
+        return pickle.load(f)
+
+
+@app.route("/match", methods=["GET"])
+def match_form():
+    cleanup_old_jobs()
+    return render_template("match_new.html")
+
+
+@app.route("/match/start", methods=["POST"])
+def match_start():
+    main = request.files.get("main_file")
+    secs = [f for f in request.files.getlist("sec_files") if f and f.filename]
+
+    def fail(msg):
+        return render_template("match_new.html", error=msg), 400
+
+    if not main or not main.filename:
+        return fail("الرجاء اختيار الملف الرئيسي أولًا.")
+    if not main.filename.lower().endswith((".xlsx", ".xlsm")):
+        return fail("الملف الرئيسي يجب أن يكون بصيغة ‎.xlsx‎.")
+    if not secs:
+        return fail("الرجاء اختيار ملف تنفيذ واحد على الأقل.")
+    bad = [f.filename for f in secs if not f.filename.lower().endswith((".xlsx", ".xlsm"))]
+    if bad:
+        return fail(f"ملفات التنفيذ يجب أن تكون ‎.xlsx‎ — تحقّق من: {bad[0]}")
+
+    job_id, d = new_job_dir()
+    main_path = os.path.join(d, "main.xlsx")
+    main.save(main_path)
+
+    sec_dir = os.path.join(d, "sec")
+    os.makedirs(sec_dir, exist_ok=True)
+    sec_paths = []
+    for f in secs:
+        p = os.path.join(sec_dir, os.path.basename(f.filename))
+        f.save(p)
+        sec_paths.append(p)
+
+    try:
+        with heavy_lock():
+            an = matcher.analyze(main_path, sec_paths)
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(d, ignore_errors=True)
+        return fail(f"تعذّرت قراءة الملفات: {exc}")
+
+    if not an["rows"]:
+        shutil.rmtree(d, ignore_errors=True)
+        return fail("الملف الرئيسي لا يحتوي على صفوف بيانات.")
+
+    with open(os.path.join(d, "analysis.pkl"), "wb") as f:
+        pickle.dump(an, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    stem = os.path.splitext(os.path.basename(main.filename))[0][:60] or "الملاحظات"
+    write_state(d, {
+        "job_id": job_id,
+        "kind": "match",
+        "stem": stem,
+        "sec_names": an["sec_names"],
+        "created_at": time.time(),
+    })
+    # الملفات الخام لم نعد بحاجتها: التحليل محفوظ كاملًا
+    try:
+        os.remove(main_path)
+    except OSError:
+        pass
+    shutil.rmtree(sec_dir, ignore_errors=True)
+
+    return redirect(url_for("match_rules", job_id=job_id))
+
+
+@app.route("/job/<job_id>/match")
+def match_rules(job_id):
+    d, state = _match_state(job_id)
+    an = _load_analysis(d)
+    total = an["total"]
+    done = len(an["matched"])
+    columns = [{"i": i, "name": h} for i, h in enumerate(an["headers"]) if h]
+    return render_template(
+        "match_rules.html", job_id=job_id, state=state, an=an,
+        total=total, done=done, remaining=total - done,
+        percent=round(100.0 * done / total, 1) if total else 0.0,
+        columns=columns,
+        distinct={str(k): v for k, v in an["distinct"].items()},
+        colors=matcher.COLORS, max_rules=matcher.MAX_RULES,
+        n_missing=len(an["missing"]), n_dups=len(an["dups"]),
+        has_status=an.get("status_col") is not None,
+    )
+
+
+@app.route("/job/<job_id>/match/build", methods=["POST"])
+def match_build(job_id):
+    d, state = _match_state(job_id)
+    an = _load_analysis(d)
+
+    rules = []
+    done_color = request.form.get("done_color") or ""
+    if done_color in matcher.COLOR_HEX:
+        rules.append({"col": -1, "value": "", "color": done_color})
+    for i in range(1, matcher.MAX_RULES + 1):
+        col = request.form.get(f"rule_col_{i}") or ""
+        val = (request.form.get(f"rule_val_{i}") or "").strip()
+        color = request.form.get(f"rule_color_{i}") or ""
+        if not col or not val or color not in matcher.COLOR_HEX:
+            continue
+        rules.append({"col": _int_ar(col, -2), "value": val, "color": color})
+
+    # المستخدم قد يصحّح عمودي التصنيف والمقاول إن أخطأ الاستنتاج التلقائي
+    for key in ("class_col", "contractor_col"):
+        raw = request.form.get(key)
+        if raw not in (None, ""):
+            an[key] = _int_ar(raw, -1)
+            if an[key] < 0 or an[key] >= len(an["headers"]):
+                an[key] = None
+
+    out_path = os.path.join(d, "output.xlsx")
+    try:
+        with heavy_lock():
+            result = matcher.build_output(
+                an, rules, out_path,
+                set_status_done=bool(request.form.get("status_done")),
+                add_source_col=bool(request.form.get("source_col")),
+            )
+    except Exception as exc:  # noqa: BLE001
+        return render_template("match_rules.html", job_id=job_id, state=state, an=an,
+                               error=f"تعذّر بناء الملف: {exc}"), 500
+
+    state["result"] = result
+    state["output_path"] = out_path
+    write_state(d, state)
+    return redirect(url_for("match_result", job_id=job_id))
+
+
+@app.route("/job/<job_id>/match/result")
+def match_result(job_id):
+    _d, state = _match_state(job_id)
+    if not state.get("result"):
+        return redirect(url_for("match_rules", job_id=job_id))
+    return render_template("match_result.html", job_id=job_id,
+                           state=state, r=state["result"])
+
+
+@app.route("/job/<job_id>/match/download")
+def match_download(job_id):
+    _d, state = _match_state(job_id)
+    if not state.get("output_path") or not os.path.exists(state["output_path"]):
+        abort(404)
+    return send_file(state["output_path"], as_attachment=True,
+                     download_name=f'متابعة_{state.get("stem") or "الملاحظات"}.xlsx')
 
 
 if __name__ == "__main__":

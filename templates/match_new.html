@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+
+  <div class="page-head">
+    <h1>متابعة الأعمال المنفّذة</h1>
+    <p>ارفع الملف الرئيسي وملفات التنفيذ، فتُعلَّم الملاحظات المنفّذة وتتلوّن، ويُبنى داتا شيت بما أُنجز وما بقي.</p>
+  </div>
+
+  {% if error %}<div class="errors">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ url_for('match_start') }}" enctype="multipart/form-data">
+
+    <label class="field-label">الملف الرئيسي <em>— قائمة الملاحظات الكاملة</em></label>
+    <label class="dropzone" id="mainZone" for="main_file">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M14 3v5h5"></path>
+        <path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"></path>
+      </svg>
+      <span class="dz-title" id="mainTitle">اسحب الملف الرئيسي هنا</span>
+      <span class="dz-hint" id="mainHint">أو اضغط للاختيار — يحتاج عمود «رقم الملاحظة»</span>
+    </label>
+    <input class="hidden-input" id="main_file" type="file" name="main_file" accept=".xlsx,.xlsm" required>
+
+    <label class="field-label" style="margin-top: 26px">ملفات التنفيذ <em>— واحد أو أكثر</em></label>
+    <label class="dropzone" id="secZone" for="sec_files">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 7V5a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v2"></path>
+        <path d="M3 10h18l-2 9a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z"></path>
+      </svg>
+      <span class="dz-title" id="secTitle">اسحب ملفات التنفيذ هنا</span>
+      <span class="dz-hint" id="secHint">تقدر تختار عدة ملفات مرة واحدة — يكفي فيها عمود رقم الملاحظة</span>
+    </label>
+    <input class="hidden-input" id="sec_files" type="file" name="sec_files"
+           accept=".xlsx,.xlsm" multiple required>
+    <p class="file-list" id="secList"></p>
+
+    <button class="btn" type="submit">طابِق الملفات</button>
+    <span class="hint">الملفات الأصلية لا تتغيّر — المخرج ملف متابعة جديد.</span>
+  </form>
+
+</div>
+
+<script>
+(function () {
+  function size(bytes) {
+    return bytes >= 1048576
+      ? (bytes / 1048576).toFixed(1) + " ميجابايت"
+      : Math.max(1, Math.round(bytes / 1024)) + " كيلوبايت";
+  }
+
+  function single(inputId, zoneId, titleId, hintId) {
+    var input = document.getElementById(inputId);
+    var zone = document.getElementById(zoneId);
+    var title = document.getElementById(titleId);
+    var hint = document.getElementById(hintId);
+    function show() {
+      if (!input.files || !input.files.length) return;
+      var f = input.files[0];
+      zone.classList.add("filled");
+      title.textContent = f.name;
+      hint.textContent = size(f.size) + " — جاهز للرفع";
+    }
+    wire(input, zone, show);
+    input.addEventListener("change", show);
+  }
+
+  function multi(inputId, zoneId, titleId, hintId, listId) {
+    var input = document.getElementById(inputId);
+    var zone = document.getElementById(zoneId);
+    var title = document.getElementById(titleId);
+    var hint = document.getElementById(hintId);
+    var list = document.getElementById(listId);
+    function show() {
+      var n = input.files ? input.files.length : 0;
+      if (!n) return;
+      zone.classList.add("filled");
+      title.textContent = n + " ملف تنفيذ";
+      hint.textContent = "اضغط لتغيير الاختيار";
+      var names = [];
+      for (var i = 0; i < n; i++) { names.push(input.files[i].name); }
+      list.textContent = names.join(" · ");
+    }
+    wire(input, zone, show);
+    input.addEventListener("change", show);
+  }
+
+  function wire(input, zone, show) {
+    ["dragenter", "dragover"].forEach(function (e) {
+      zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.add("drag"); });
+    });
+    ["dragleave", "drop"].forEach(function (e) {
+      zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.remove("drag"); });
+    });
+    zone.addEventListener("drop", function (ev) {
+      if (ev.dataTransfer && ev.dataTransfer.files.length) { input.files = ev.dataTransfer.files; show(); }
+    });
+  }
+
+  single("main_file", "mainZone", "mainTitle", "mainHint");
+  multi("sec_files", "secZone", "secTitle", "secHint", "secList");
+})();
+</script>
+{% endblock %}

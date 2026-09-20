@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap-wide">
+
+  <div class="page-head">
+    <h1>نتيجة المطابقة</h1>
+    <p>{{ state.sec_names|length }} ملف تنفيذ · {{ an.headers|length }} عمود في الملف الرئيسي</p>
+  </div>
+
+  {% if error %}<div class="errors">{{ error }}</div>{% endif %}
+
+  <div class="kpi-row">
+    <div class="kpi"><span class="kpi-num">{{ total }}</span><span class="kpi-lbl">إجمالي الملاحظات</span></div>
+    <div class="kpi ok"><span class="kpi-num">{{ done }}</span><span class="kpi-lbl">منفّذة</span></div>
+    <div class="kpi"><span class="kpi-num">{{ remaining }}</span><span class="kpi-lbl">متبقية</span></div>
+    <div class="kpi"><span class="kpi-num">{{ percent }}%</span><span class="kpi-lbl">نسبة الإنجاز</span></div>
+  </div>
+
+  {% if an.carried %}
+  <p class="summary-line"><b>{{ an.carried }}</b> منها كانت معلّمة «منفذ» في الملف الرئيسي من جولة سابقة، أبقيناها كما هي.</p>
+  {% endif %}
+
+  {% if n_missing or n_dups %}
+  <p class="summary-line">
+    {% if n_missing %}<b>{{ n_missing }}</b> رقم في ملفات التنفيذ ليس له مقابل في الملف الرئيسي.{% endif %}
+    {% if n_dups %} <b>{{ n_dups }}</b> رقم مكرر داخل الملف الرئيسي.{% endif %}
+    تجدها مفصّلة في ورقة «تنبيهات» داخل الملف الناتج.
+  </p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('match_build', job_id=job_id) }}">
+
+    <h2 class="sec-title">قواعد التلوين</h2>
+    <p class="sec-note">أول قاعدة تنطبق على الصف هي التي تلوّنه، فرتّب الأهم في الأعلى.</p>
+
+    <div class="rule rule-fixed">
+      <span class="rule-tag">الملاحظات المنفّذة</span>
+      <span class="color-pick">
+        <i class="sw" data-sw></i>
+        <select name="done_color" class="rule-color" aria-label="لون الملاحظات المنفذة">
+          {% for key, name, hex in colors %}
+          <option value="{{ key }}" data-hex="#{{ hex }}" {% if key == 'green' %}selected{% endif %}>{{ name }}</option>
+          {% endfor %}
+          <option value="none" data-hex="">بدون لون</option>
+        </select>
+      </span>
+    </div>
+
+    {% for i in range(1, max_rules + 1) %}
+    <div class="rule" data-rule="{{ i }}" {% if i > 2 %}hidden{% endif %}>
+      <select name="rule_col_{{ i }}" class="rule-col" data-i="{{ i }}" aria-label="عمود القاعدة {{ i }}">
+        <option value="">— اختر عمودًا —</option>
+        {% for c in columns %}<option value="{{ c.i }}">{{ c.name }}</option>{% endfor %}
+      </select>
+      <input type="text" name="rule_val_{{ i }}" id="val_{{ i }}" list="dl_{{ i }}"
+             placeholder="القيمة (مثال: mv)" autocomplete="off" aria-label="قيمة القاعدة {{ i }}">
+      <datalist id="dl_{{ i }}"></datalist>
+      <span class="color-pick">
+        <i class="sw" data-sw></i>
+        <select name="rule_color_{{ i }}" class="rule-color" aria-label="لون القاعدة {{ i }}">
+          {% for key, name, hex in colors %}
+          <option value="{{ key }}" data-hex="#{{ hex }}">{{ name }}</option>
+          {% endfor %}
+        </select>
+      </span>
+    </div>
+    {% endfor %}
+
+    <button class="btn btn-ghost btn-small" type="button" id="addRule">أضف قاعدة أخرى</button>
+
+    <h2 class="sec-title">الداتا شيت</h2>
+    <p class="sec-note">ورقة مستقلة داخل الملف: الإنجاز الإجمالي، وتوزيعه حسب العمودين التاليين.</p>
+
+    <div class="rule rule-two">
+      <label class="rule-lbl">عمود التصنيف
+        <select name="class_col">
+          <option value="">— بدون —</option>
+          {% for c in columns %}
+          <option value="{{ c.i }}" {% if c.i == an.class_col %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="rule-lbl">عمود المقاول
+        <select name="contractor_col">
+          <option value="">— بدون —</option>
+          {% for c in columns %}
+          <option value="{{ c.i }}" {% if c.i == an.contractor_col %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <h2 class="sec-title">خيارات</h2>
+
+    <label class="check">
+      <input type="checkbox" name="source_col" checked>
+      <span>أضف عمود «مصدر التنفيذ» يذكر اسم الملف الذي جاءت منه كل ملاحظة منفّذة</span>
+    </label>
+
+    {% if has_status %}
+    <label class="check">
+      <input type="checkbox" name="status_done">
+      <span>غيّر عمود «{{ an.headers[an.status_col] }}» إلى «منجز» للملاحظات المنفّذة فقط</span>
+    </label>
+    {% endif %}
+
+    <button class="btn" type="submit">أنشئ ملف المتابعة</button>
+  </form>
+
+</div>
+
+<script>
+var DISTINCT = {{ distinct|tojson }};
+
+// قائمة القيم تتغيّر بتغيّر العمود: المستخدم يختار من قيم ملفه لا يكتبها غيبًا
+document.querySelectorAll(".rule-col").forEach(function (sel) {
+  sel.addEventListener("change", function () {
+    var dl = document.getElementById("dl_" + sel.dataset.i);
+    var input = document.getElementById("val_" + sel.dataset.i);
+    dl.innerHTML = "";
+    input.value = "";
+    var vals = DISTINCT[sel.value] || [];
+    vals.forEach(function (v) {
+      var o = document.createElement("option");
+      o.value = v;
+      dl.appendChild(o);
+    });
+    input.placeholder = vals.length ? "اختر أو اكتب القيمة" : "اكتب القيمة";
+  });
+});
+
+// مربّع اللون بجانب القائمة: أسماء الألوان وحدها لا تُري النتيجة
+document.querySelectorAll(".color-pick").forEach(function (box) {
+  var sel = box.querySelector(".rule-color");
+  var sw = box.querySelector("[data-sw]");
+  function paint() {
+    var hex = sel.options[sel.selectedIndex].dataset.hex || "";
+    sw.style.background = hex || "transparent";
+    sw.style.borderStyle = hex ? "solid" : "dashed";
+  }
+  sel.addEventListener("change", paint);
+  paint();
+});
+
+// نبدأ بقاعدتين فقط ونكشف الباقي عند الطلب حتى لا تمتلئ الصفحة بصفوف فارغة
+(function () {
+  var btn = document.getElementById("addRule");
+  btn.addEventListener("click", function () {
+    var next = document.querySelector(".rule[data-rule][hidden]");
+    if (next) { next.hidden = false; next.querySelector("select").focus(); }
+    if (!document.querySelector(".rule[data-rule][hidden]")) { btn.hidden = true; }
+  });
+})();
+</script>
+{% endblock %}

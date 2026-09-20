@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+
+  <div class="page-head">
+    <h1>ملف المتابعة جاهز</h1>
+    <p>الملاحظات المنفّذة معلَّمة وملوّنة، ومعها ورقة «الداتا شيت».</p>
+  </div>
+
+  <div class="kpi-row">
+    <div class="kpi"><span class="kpi-num">{{ r.total }}</span><span class="kpi-lbl">إجمالي</span></div>
+    <div class="kpi ok"><span class="kpi-num">{{ r.done }}</span><span class="kpi-lbl">منفّذة</span></div>
+    <div class="kpi"><span class="kpi-num">{{ r.remaining }}</span><span class="kpi-lbl">متبقية</span></div>
+    <div class="kpi"><span class="kpi-num">{{ r.percent }}%</span><span class="kpi-lbl">نسبة الإنجاز</span></div>
+  </div>
+
+  <ul class="stats">
+    <li><span>أوراق الملف</span><b>الملاحظات · الداتا شيت{% if r.alerts %} · تنبيهات{% endif %}</b></li>
+    {% if r.missing %}<li><span>أرقام بلا مقابل في الملف الرئيسي</span><b>{{ r.missing }}</b></li>{% endif %}
+    {% if r.dups %}<li><span>أرقام مكررة في الملف الرئيسي</span><b>{{ r.dups }}</b></li>{% endif %}
+  </ul>
+
+  <a class="btn" href="{{ url_for('match_download', job_id=job_id) }}">تحميل ملف المتابعة</a>
+  <span class="hint">الملف الناتج ملف متابعة بالقيم فقط — احتفظ بملفك الأصلي لتوليد تقارير البوربوينت.</span>
+
+  <p style="margin-top: 26px">
+    <a class="back-link" href="{{ url_for('match_rules', job_id=job_id) }}">رجوع لتعديل الألوان والخيارات</a>
+  </p>
+
+</div>
+{% endblock %}

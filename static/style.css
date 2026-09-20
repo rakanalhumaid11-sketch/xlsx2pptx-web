@@ -516,3 +516,107 @@ input[type="number"] { -moz-appearance: textfield; }
 .howto summary { cursor: pointer; font-size: 14px; color: var(--accent); }
 .howto ol { margin: 12px 0 0; padding-inline-start: 20px; font-size: 14px; color: var(--muted); line-height: 2; }
 .howto b { color: var(--text); font-weight: 500; }
+
+/* ------------------------------------------------ متابعة الأعمال المنفّذة */
+
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 26px;
+}
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.kpi-num { font-size: 26px; font-weight: 500; color: var(--text); line-height: 1.2; }
+.kpi-lbl { font-size: 13px; color: var(--muted); }
+.kpi.ok .kpi-num { color: var(--ok); }
+
+.sec-title {
+  margin: 34px 0 6px;
+  font-size: 16px;
+  font-weight: 500;
+  color: #C3CCD9;
+}
+.sec-note { margin: 0 0 14px; font-size: 13px; color: var(--muted); }
+
+.rule {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 150px;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.rule select, .rule input[type="text"] { min-height: 46px; font-size: 15px; }
+/* display:grid يغلب [hidden] الافتراضي، فنعيد إخفاء القواعد غير المفعّلة */
+.rule[hidden] { display: none; }
+.rule-fixed {
+  grid-template-columns: 1fr 150px;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+.rule-tag { font-size: 15px; color: var(--text); }
+.rule-two { grid-template-columns: 1fr 1fr; }
+.rule-lbl { display: block; font-size: 13px; color: var(--muted); }
+.rule-lbl select { margin-top: 6px; }
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.check input[type="checkbox"] {
+  flex: none;
+  width: 18px; height: 18px;
+  margin-top: 4px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.check span { line-height: 1.7; }
+
+@media (max-width: 720px) {
+  .kpi-row { grid-template-columns: repeat(2, 1fr); }
+  .rule, .rule-two { grid-template-columns: 1fr; }
+  .rule-fixed { grid-template-columns: 1fr; align-items: stretch; }
+  /* عند التكديس رأسيًا تذوب حدود القواعد ببعضها، فنؤطّر كل قاعدة على حدة */
+  .rule[data-rule] {
+    gap: 6px;
+    margin-bottom: 12px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+}
+
+.color-pick { position: relative; display: block; }
+.color-pick .sw {
+  position: absolute;
+  inset-inline-start: 12px;
+  top: 50%;
+  width: 16px; height: 16px;
+  margin-top: -8px;
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  pointer-events: none;
+}
+.color-pick select { padding-inline-start: 38px; }
+
+.btn-small {
+  margin-top: 6px;
+  min-height: 42px;
+  padding: 0 18px;
+  font-size: 14px;
+}

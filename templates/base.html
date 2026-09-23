@@ -24,7 +24,7 @@
     </div>
 
     <div class="nav">
-      <a href="{{ url_for('index') }}" {% if not ep.startswith('after') and not ep.startswith('zones') and not ep.startswith('match') %}class="active"{% endif %}>
+      <a href="{{ url_for('index') }}" {% if not ep.startswith(('after', 'zones', 'match', 'approve')) %}class="active"{% endif %}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="1.7"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M14 3v5h5"></path>
@@ -56,6 +56,14 @@
           <path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"></path>
         </svg>
         متابعة المنفذ
+      </a>
+      <a href="{{ url_for('approve_form') }}" {% if ep.startswith('approve') %}class="active"{% endif %}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 11.5 11.5 14 16 9"></path>
+          <circle cx="12" cy="12" r="9"></circle>
+        </svg>
+        حالة الاعتماد
       </a>
     </div>
   </nav>

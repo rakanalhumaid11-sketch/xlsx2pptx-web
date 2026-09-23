@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+
+  <div class="page-head">
+    <h1>ملف الاعتماد جاهز{% if r.feeder %} — {{ r.feeder }}{% endif %}</h1>
+    <p>الملاحظات ملوّنة حسب خانتها، ومعها ورقة «الداتا شيت».</p>
+  </div>
+
+  <div class="kpi-row kpi-5">
+    <div class="kpi"><span class="kpi-num">{{ r.total }}</span><span class="kpi-lbl">الإجمالي</span></div>
+    {% for st in states %}
+    <div class="kpi {% if loop.first %}ok{% endif %}">
+      <span class="kpi-num">{{ r.counts[st] }}</span><span class="kpi-lbl">{{ st }}</span>
+    </div>
+    {% endfor %}
+  </div>
+
+  <ul class="stats">
+    <li><span>نسبة الاعتماد</span><b>{{ r.percent }}%</b></li>
+    {% if r.new_cols %}<li><span>عمود أُضيف في آخر الملف</span><b>{{ r.new_cols|join(' · ') }}</b></li>{% endif %}
+    {% if r.groups %}<li><span>جداول الداتا شيت</span><b>{{ r.groups|join(' · ') }}</b></li>{% endif %}
+  </ul>
+
+  <a class="btn" href="{{ url_for('approve_download', job_id=job_id) }}">تحميل الملف</a>
+  <span class="hint">
+    عمود «حالة الاعتماد» فيه قائمة منسدلة — غيّر خانة أي صف بيدك، فيتغيّر لونه ويتحدّث الداتا شيت تلقائيًا.
+  </span>
+
+  <p style="margin-top: 26px">
+    <a class="back-link" href="{{ url_for('approve_rules', job_id=job_id) }}">رجوع لتعديل الخانات والألوان</a>
+  </p>
+
+</div>
+{% endblock %}

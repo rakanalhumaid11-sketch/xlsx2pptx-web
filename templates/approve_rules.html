@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap-wide">
+
+  <div class="page-head">
+    <h1>حالة الاعتماد{% if an.feeder %} — {{ an.feeder }}{% endif %}</h1>
+    <p>{{ total }} ملاحظة · {{ an.statuses|length }} قيمة في عمود «{{ an.headers[an.status_col] if an.status_col is not none else '—' }}»</p>
+  </div>
+
+  {% if error %}<div class="errors">{{ error }}</div>{% endif %}
+
+  <div class="kpi-row kpi-5">
+    <div class="kpi"><span class="kpi-num">{{ total }}</span><span class="kpi-lbl">الإجمالي</span></div>
+    {% for st in states %}
+    <div class="kpi {% if loop.first %}ok{% endif %}">
+      <span class="kpi-num">{{ counts[st] }}</span><span class="kpi-lbl">{{ st }}</span>
+    </div>
+    {% endfor %}
+  </div>
+
+  <form method="post" action="{{ url_for('approve_build', job_id=job_id) }}">
+
+    <h2 class="sec-title">توزيع قيم عمود الحالة</h2>
+    <p class="sec-note">استنتجتُ لكل قيمة خانتها — غيّرها إن أردت.</p>
+
+    {% for s in an.statuses %}
+    <div class="rule rule-map">
+      <span class="rule-tag"><b>{{ s.raw }}</b><span class="rule-count">{{ s.count }}</span></span>
+      <select name="map_{{ s.raw }}" aria-label="خانة {{ s.raw }}">
+        {% for st in states %}
+        <option value="{{ st }}" {% if st == s.bucket %}selected{% endif %}>{{ st }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endfor %}
+
+    <h2 class="sec-title">ألوان الخانات</h2>
+    <p class="sec-note">
+      التلوين حيّ: عمود «حالة الاعتماد» يُضاف في آخر الملف بقائمة منسدلة،
+      فإذا غيّرت خانة صف بيدك تغيّر لونه وتحدّث الداتا شيت في الحال.
+    </p>
+
+    {% for st in states %}
+    <div class="rule rule-fixed">
+      <span class="rule-tag">{{ st }}</span>
+      <span class="color-pick">
+        <i class="sw" data-sw></i>
+        <select name="color_{{ st }}" class="rule-color" aria-label="لون {{ st }}">
+          {% for key, name, hex in colors %}
+          <option value="{{ key }}" data-hex="#{{ hex }}"
+            {%- if key == default_colors[st] %} selected{% endif %}>{{ name }}</option>
+          {% endfor %}
+          <option value="none" data-hex=""
+            {%- if default_colors[st] == 'none' %} selected{% endif %}>بدون لون</option>
+        </select>
+      </span>
+    </div>
+    {% endfor %}
+
+    <h2 class="sec-title">جداول الداتا شيت</h2>
+    <p class="sec-note">ثلاثة جداول على الأكثر، كل جدول يوزّع الخانات الأربع على قيم عمود.</p>
+
+    <div class="rule rule-three">
+      {% for i in range(1, 4) %}
+      <select name="group_{{ i }}" aria-label="عمود الجدول {{ i }}">
+        <option value="">— بدون —</option>
+        {% for g in groupable %}
+        <option value="{{ g.i }}"
+          {%- if defaults|length >= i and g.i == defaults[i-1] %} selected{% endif %}>{{ g.name }}</option>
+        {% endfor %}
+      </select>
+      {% endfor %}
+    </div>
+
+    <button class="btn" type="submit">أنشئ ملف الاعتماد</button>
+    <span class="hint">ملفك الأصلي يبقى كما هو تمامًا — تنسيقه وترتيب أعمدته وعروضها وأوراقه.</span>
+  </form>
+
+</div>
+
+<script>
+document.querySelectorAll(".color-pick").forEach(function (box) {
+  var sel = box.querySelector(".rule-color");
+  var sw = box.querySelector("[data-sw]");
+  function paint() {
+    var hex = sel.options[sel.selectedIndex].dataset.hex || "";
+    sw.style.background = hex || "transparent";
+    sw.style.borderStyle = hex ? "solid" : "dashed";
+  }
+  sel.addEventListener("change", paint);
+  paint();
+});
+</script>
+{% endblock %}

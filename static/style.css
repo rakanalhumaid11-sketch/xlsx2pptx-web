@@ -625,3 +625,16 @@ input[type="number"] { -moz-appearance: textfield; }
 .rule-one { grid-template-columns: 1fr; }
 @media (max-width: 900px) { .kpi-row.kpi-5 { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 720px) { .kpi-row.kpi-5 { grid-template-columns: repeat(2, 1fr); } }
+
+.rule-map { grid-template-columns: 1fr 260px; align-items: center; margin-bottom: 8px; }
+.rule-map .rule-tag {
+  display: flex; align-items: center; gap: 10px;
+  padding-inline-start: 14px; font-size: 15px;
+}
+.rule-count {
+  min-width: 46px; padding: 2px 10px;
+  font-size: 13px; color: var(--muted); text-align: center;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
+}
+.rule-three { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 720px) { .rule-map, .rule-three { grid-template-columns: 1fr; } }

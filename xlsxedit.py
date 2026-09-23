@@ -250,10 +250,11 @@ class SheetBuilder:
     """يبني XML ورقة جديدة من خلايا بسيطة (نصوص وأرقام) بأنماط معطاة."""
 
     def __init__(self, rtl: bool = True, gridlines: bool = False,
-                 tab_color: str = ""):
+                 tab_color: str = "", landscape: bool = False):
         self.rtl = rtl
         self.gridlines = gridlines
         self.tab_color = tab_color
+        self.landscape = landscape
         self.cells: Dict[Tuple[int, int], Tuple[Any, Optional[int], str]] = {}
         self.merges: List[str] = []
         self.widths: Dict[int, float] = {}
@@ -336,14 +337,17 @@ class SheetBuilder:
             '%s<sheetData>%s</sheetData>%s%s'
             '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5"'
             ' header="0.3" footer="0.3"/>'
-            '<pageSetup orientation="portrait" fitToWidth="1" fitToHeight="0"/>'
+            '<pageSetup orientation="%s" fitToWidth="1" fitToHeight="0"/>'
             '</worksheet>' % (
                 MAIN_NS, REL_NS,
-                ('<sheetPr><tabColor rgb="FF%s"/></sheetPr>' % self.tab_color.upper()
-                 if self.tab_color else ""), dim,
+                # fitToWidth لا يعمل إلا مع pageSetUpPr، وبدونه تنقسم الورقة صفحتين
+                "<sheetPr>%s<pageSetUpPr fitToPage=\"1\"/></sheetPr>" % (
+                    '<tabColor rgb="FF%s"/>' % self.tab_color.upper()
+                    if self.tab_color else ""), dim,
                 ' rightToLeft="1"' if self.rtl else "",
                 ' showGridLines="0"' if not self.gridlines else "",
-                cols_xml, "".join(body), merges, cf))
+                cols_xml, "".join(body), merges, cf,
+                "landscape" if self.landscape else "portrait"))
 
 
 # ------------------------------------------------------------------ تعديل ورقة

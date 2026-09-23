@@ -29,7 +29,8 @@ ID_ALIASES = ["رقم الملاحظة", "رقم الملاحظه", "الملا�
               "رقم البلاغ", "رقم"]
 CLASS_ALIASES = ["التصنيف الرئيسي", "التصنيف الرئيسى", "التصنيف", "تصنيف الملاحظة",
                  "نوع الملاحظة", "النوع"]
-CONTRACTOR_ALIASES = ["المقاول", "اسم المقاول", "الشركة", "الشركه", "المنفذ"]
+CONTRACTOR_ALIASES = ["المقاول", "اسم المقاول", "الشركة", "الشركه", "المنفذ",
+                      "تمت المعالجة بواسطة", "تمت المعالجه بواسطة"]
 STATUS_ALIASES = ["حالة الملاحظة", "حالة الملاحظه", "الحالة", "الحاله"]
 
 SEC_STATUS_ALIASES = ["حالة التنفيذ", "الحالة", "حالة الملاحظة", "الوضع",
@@ -419,7 +420,7 @@ def _breakdown(values: List[str], states: List[str]) -> List[Tuple[str, int, int
 
 # ------------------------------------------------------------------ الداتا شيت
 
-def _make_styles(st: Styles) -> Dict[str, int]:
+def make_styles(st: Styles) -> Dict[str, int]:
     """يسجّل أنماط الأوراق الجديدة داخل جدول أنماط الملف الأصلي."""
     f_title = st.font(16, True, "FFFFFF")
     f_sub = st.font(10, False, MUTED)
@@ -463,7 +464,7 @@ def _make_styles(st: Styles) -> Dict[str, int]:
     }
 
 
-def _band(sb: SheetBuilder, row: int, c1: int, c2: int, text: Any, style: int):
+def band(sb: SheetBuilder, row: int, c1: int, c2: int, text: Any, style: int):
     """خلية ممتدة على عدة أعمدة — كل خلايا الامتداد تأخذ النمط ليكتمل اللون."""
     sb.set(row, c1, text, style)
     for c in range(c1 + 1, c2 + 1):
@@ -479,7 +480,7 @@ def _live_table(sb: SheetBuilder, s: Dict[str, int], row: int, title: str,
                 data: List[Tuple[str, int, int, int]], src_range: str,
                 exec_range: str) -> int:
     """جدول حيّ: الأرقام صيغ COUNTIF تتحدّث فور تعديل الورقة الرئيسية."""
-    _band(sb, row, 1, 6, title, s["sect"])
+    band(sb, row, 1, 6, title, s["sect"])
     sb.height(row, 22)
     row += 1
     for j, h in enumerate(HEAD):
@@ -522,9 +523,9 @@ def build_datasheet(s: Dict[str, int], an: Dict[str, Any], states: List[str],
 
     sb.height(1, 8)
     sb.set(1, 1, None, s["spacer"])
-    _band(sb, 2, 1, 6, "داتا شيت متابعة الإنجاز", s["title"])
+    band(sb, 2, 1, 6, "داتا شيت متابعة الإنجاز", s["title"])
     sb.height(2, 36)
-    _band(sb, 3, 1, 6, subtitle, s["sub"])
+    band(sb, 3, 1, 6, subtitle, s["sub"])
     sb.height(3, 20)
     sb.height(4, 10)
     sb.set(4, 1, None, s["spacer"])
@@ -534,7 +535,7 @@ def build_datasheet(s: Dict[str, int], an: Dict[str, Any], states: List[str],
     sb.set(5, 2, "منفّذة", s["kpi_lbl"])
     sb.set(5, 3, "جاري العمل", s["kpi_lbl"])
     sb.set(5, 4, "متبقية", s["kpi_lbl"])
-    _band(sb, 5, 5, 6, "نسبة الإنجاز", s["kpi_lbl"])
+    band(sb, 5, 5, 6, "نسبة الإنجاز", s["kpi_lbl"])
 
     sb.set(6, 1, total, s["kpi_num"], formula="COUNTA(%s)" % exec_range)
     sb.set(6, 2, done, s["kpi_ok"], formula="COUNTIF(%s,%s)" % (exec_range, _q(ST_DONE)))
@@ -572,7 +573,7 @@ def build_alerts(s: Dict[str, int], missing: List[Tuple[str, str]],
         sb.width(c, w)
     sb.height(1, 8)
     sb.set(1, 1, None, s["spacer"])
-    _band(sb, 2, 1, 2, "تنبيهات المطابقة", s["title"])
+    band(sb, 2, 1, 2, "تنبيهات المطابقة", s["title"])
     sb.height(2, 36)
     sb.height(3, 12)
     sb.set(3, 1, None, s["spacer"])
@@ -585,7 +586,7 @@ def build_alerts(s: Dict[str, int], missing: List[Tuple[str, str]],
              ("رقم الملاحظة", "رقم الصف"), dups[:2000])):
         if not data:
             continue
-        _band(sb, row, 1, 2, title, s["sect"])
+        band(sb, row, 1, 2, title, s["sect"])
         sb.height(row, 22)
         row += 1
         sb.set(row, 1, head[0], s["th"])
@@ -695,7 +696,7 @@ def build_output(an: Dict[str, Any], rules: List[Dict[str, Any]],
         states.count(ST_DONE), states.count(ST_WIP), len(rows))
 
     def sheets_factory(st: Styles):
-        s = _make_styles(st)
+        s = make_styles(st)
         out = [("الداتا شيت",
                 build_datasheet(s, an, states, contractors, subtitle,
                                 exec_range, class_range, contractor_range))]

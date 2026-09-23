@@ -24,6 +24,7 @@ from flask import (
 )
 
 import afterfill
+import approval
 import builder
 import matcher
 import zones
@@ -773,6 +774,139 @@ def match_download(job_id):
         abort(404)
     return send_file(state["output_path"], as_attachment=True,
                      download_name=f'متابعة_{state.get("stem") or "الملاحظات"}.xlsx')
+
+
+# --------------------------------------------------------------------------
+# حالة الاعتماد: ملف واحد -> تلوين حسب الحالة + داتا شيت
+# --------------------------------------------------------------------------
+
+def _approve_state(job_id):
+    d = job_dir(job_id)
+    state = read_state(d)
+    if state.get("kind") != "approve":
+        abort(404)
+    return d, state
+
+
+@app.route("/approve", methods=["GET"])
+def approve_form():
+    cleanup_old_jobs()
+    return render_template("approve_new.html")
+
+
+@app.route("/approve/start", methods=["POST"])
+def approve_start():
+    f = request.files.get("excel_file")
+    if not f or not f.filename:
+        return render_template("approve_new.html", error="الرجاء اختيار الملف أولًا."), 400
+    if not f.filename.lower().endswith((".xlsx", ".xlsm")):
+        return render_template("approve_new.html",
+                               error="الملف يجب أن يكون بصيغة ‎.xlsx‎."), 400
+
+    job_id, d = new_job_dir()
+    path = os.path.join(d, "input.xlsx")
+    f.save(path)
+    try:
+        with heavy_lock():
+            an = approval.analyze(path)
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(d, ignore_errors=True)
+        return render_template("approve_new.html",
+                               error=f"تعذّرت قراءة الملف: {exc}"), 400
+
+    with open(os.path.join(d, "analysis.pkl"), "wb") as fh:
+        pickle.dump(an, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    write_state(d, {
+        "job_id": job_id,
+        "kind": "approve",
+        "stem": os.path.splitext(os.path.basename(f.filename))[0][:60] or "الملاحظات",
+        "main_path": path,
+        "created_at": time.time(),
+    })
+    return redirect(url_for("approve_rules", job_id=job_id))
+
+
+@app.route("/job/<job_id>/approve")
+def approve_rules(job_id):
+    d, state = _approve_state(job_id)
+    an = _load_analysis(d)
+    mapping = {s["raw"]: s["bucket"] for s in an["statuses"]}
+    buckets = approval.resolve(an, mapping)
+    counts = {st: buckets.count(st) for st in approval.AP_STATES}
+    total = an["total"]
+    return render_template(
+        "approve_rules.html", job_id=job_id, state=state, an=an,
+        total=total, counts=counts,
+        percent=round(100.0 * counts[approval.AP_APPROVED] / total, 1) if total else 0.0,
+        states=approval.AP_STATES, colors=matcher.COLORS,
+        default_colors=approval.DEFAULT_COLORS,
+        groupable=an["groupable"],
+        # الافتراضي جدول واحد فقط (التصنيف)؛ المقاول والأولوية يبقيان متاحين
+        # في القائمتين الأخريين لمن أرادهما، لكنهما مغلقان دائمًا في البداية
+        defaults=[c for c in (an.get("class_col"),) if c is not None],
+    )
+
+
+@app.route("/job/<job_id>/approve/build", methods=["POST"])
+def approve_build(job_id):
+    d, state = _approve_state(job_id)
+    an = _load_analysis(d)
+
+    mapping = {}
+    for s in an["statuses"]:
+        chosen = request.form.get("map_" + s["raw"])
+        mapping[s["raw"]] = chosen if chosen in approval.AP_STATES else s["bucket"]
+
+    colors = {}
+    for st in approval.AP_STATES:
+        c = request.form.get("color_" + st) or ""
+        colors[st] = c if c in matcher.COLOR_HEX else "none"
+
+    groups = []
+    for i in range(1, 4):
+        raw = request.form.get("group_%d" % i)
+        if raw:
+            c = _int_ar(raw, -1)
+            if 0 <= c < len(an["headers"]) and c not in groups:
+                groups.append(c)
+
+    src = state.get("main_path") or ""
+    if not os.path.exists(src):
+        return render_template("approve_rules.html", job_id=job_id, state=state, an=an,
+                               error="انتهت صلاحية الجلسة — أعد رفع الملف."), 410
+
+    out_path = os.path.join(d, "output.xlsx")
+    try:
+        with heavy_lock():
+            result = approval.build_output(an, mapping, colors, src, out_path,
+                                           group_cols=groups)
+    except Exception as exc:  # noqa: BLE001
+        return render_template("approve_rules.html", job_id=job_id, state=state, an=an,
+                               error=f"تعذّر بناء الملف: {exc}"), 500
+
+    state["result"] = result
+    state["output_path"] = out_path
+    write_state(d, state)
+    return redirect(url_for("approve_result", job_id=job_id))
+
+
+@app.route("/job/<job_id>/approve/result")
+def approve_result(job_id):
+    _d, state = _approve_state(job_id)
+    if not state.get("result"):
+        return redirect(url_for("approve_rules", job_id=job_id))
+    return render_template("approve_result.html", job_id=job_id, state=state,
+                           r=state["result"], states=approval.AP_STATES)
+
+
+@app.route("/job/<job_id>/approve/download")
+def approve_download(job_id):
+    _d, state = _approve_state(job_id)
+    if not state.get("output_path") or not os.path.exists(state["output_path"]):
+        abort(404)
+    name = (state.get("result") or {}).get("feeder") or state.get("stem") or "الملاحظات"
+    return send_file(state["output_path"], as_attachment=True,
+                     download_name=f"اعتماد_{name}.xlsx".replace(" — ", "-"))
 
 
 if __name__ == "__main__":

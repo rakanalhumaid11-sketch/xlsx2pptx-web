@@ -134,7 +134,8 @@ class Styles:
         return self.base["font"] + len(self.added["font"]) - 1
 
     def border(self, color: str = "BFCAD4", sides: str = "lrtb",
-               thick_bottom: Optional[str] = None) -> int:
+               thick_bottom: Optional[str] = None,
+               thick_top: Optional[str] = None) -> int:
         def side(tag, on, col, style="thin"):
             if not on:
                 return "<%s/>" % tag
@@ -143,7 +144,8 @@ class Styles:
             "<border>%s%s%s%s<diagonal/></border>" % (
                 side("left", "l" in sides, color),
                 side("right", "r" in sides, color),
-                side("top", "t" in sides, color),
+                side("top", True, thick_top, "medium") if thick_top
+                else side("top", "t" in sides, color),
                 side("bottom", True, thick_bottom, "medium") if thick_bottom
                 else side("bottom", "b" in sides, color)))
         return self.base["border"] + len(self.added["border"]) - 1

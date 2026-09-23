@@ -17,7 +17,7 @@
   </div>
 
   <ul class="stats">
-    <li><span>نسبة الاعتماد</span><b>{{ r.percent }}%</b></li>
+    <li><span>نسبة الإنجاز</span><b>{{ r.percent }}%</b></li>
     {% if r.new_cols %}<li><span>عمود أُضيف في آخر الملف</span><b>{{ r.new_cols|join(' · ') }}</b></li>{% endif %}
     {% if r.groups %}<li><span>جداول الداتا شيت</span><b>{{ r.groups|join(' · ') }}</b></li>{% endif %}
   </ul>
@@ -25,6 +25,7 @@
   <a class="btn" href="{{ url_for('approve_download', job_id=job_id) }}">تحميل الملف</a>
   <span class="hint">
     عمود «حالة الاعتماد» فيه قائمة منسدلة — غيّر خانة أي صف بيدك، فيتغيّر لونه ويتحدّث الداتا شيت تلقائيًا.
+    والألوان تظهر أيضًا لمن يفتح الملف على جواله بلا إكسل.
   </span>
 
   <p style="margin-top: 26px">

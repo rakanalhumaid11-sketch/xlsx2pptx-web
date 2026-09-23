@@ -374,27 +374,36 @@ def state_cf_rules(rules: List[Dict[str, Any]], first_row: int,
     return out
 
 
-def column_fills(rules: List[Dict[str, Any]], rows: List[List[Any]],
-                 row_nums: List[int], matched: set) -> Dict[int, str]:
-    """قواعد الأعمدة تلوّن الصفوف التي وردت في ملفات التنفيذ **وحدها**.
+def static_fills(rules: List[Dict[str, Any]], rows: List[List[Any]],
+                 states: List[str], row_nums: List[int], matched: set) -> Dict[int, str]:
+    """تعبئة ثابتة لكل صف — تحت التنسيق الشرطي لا بدلًا منه.
 
-    تلوين كل صفوف الملف التي تحمل القيمة يُفقد التقرير معناه: المقصود تمييز
-    ما سُلّم للفرق فعلًا، لا كل ما في الملف."""
+    التنسيق الشرطي لا تعرضه عارضات الملفات البسيطة على الجوال (واتساب مثلًا)،
+    فيصل الملف بلا ألوان لمن ليس عنده إكسل. التعبئة الثابتة تظهر في كل مكان،
+    وإكسل يغطّيها بالتنسيق الشرطي فيبقى اللون حيًّا عند التعديل اليدوي.
+
+    وقواعد الأعمدة تلوّن الصفوف التي وردت في ملفات التنفيذ **وحدها**: تلوين
+    كل صفوف الملف التي تحمل القيمة يُفقد التقرير معناه."""
     out: Dict[int, str] = {}
     for i, r in enumerate(rows):
-        if i not in matched:
-            continue
-        for rule in rules:
-            if rule.get("kind") == "state":
-                continue
+        for rule in rules:                 # أول قاعدة تنطبق هي التي تلوّن
             color = COLOR_HEX.get(rule.get("color") or "")
+            if not color:
+                continue
+            if rule.get("kind") == "state":
+                if states[i] == rule.get("key"):
+                    out[row_nums[i]] = color
+                    break
+                continue
+            if i not in matched:
+                continue
             col = rule.get("key")
             want = engine.normalize_ar(rule.get("value") or "")
-            if not color or not want or not isinstance(col, int) or col >= len(r):
+            if not want or not isinstance(col, int) or col >= len(r):
                 continue
             if engine.normalize_ar(_clean(r[col])) == want:
                 out[row_nums[i]] = color
-                break              # أول قاعدة تنطبق هي التي تلوّن
+                break
     return out
 
 
@@ -457,6 +466,9 @@ def make_styles(st: Styles) -> Dict[str, int]:
         "name_b": st.xf(f_td, fl_band, b_all, halign="right", indent=1),
         "pct": st.xf(f_td, 0, b_all, pct, halign="center"),
         "pct_b": st.xf(f_td, fl_band, b_all, pct, halign="center"),
+        # التواريخ تُكتب قيمًا لا نصًّا كي تظهر «2026-09-03» لا «… 00:00:00»
+        "date": st.xf(f_td, 0, b_all, st.numfmt("yyyy-mm-dd"), halign="center"),
+        "date_b": st.xf(f_td, fl_band, b_all, st.numfmt("yyyy-mm-dd"), halign="center"),
         "kpi_lbl": st.xf(f_lbl, fl_soft, b_top, halign="center"),
         "kpi_num": st.xf(f_kpi, fl_soft, b_bot, num, halign="center"),
         "kpi_ok": st.xf(f_kpi_ok, fl_soft, b_bot, num, halign="center"),
@@ -691,9 +703,11 @@ def build_output(an: Dict[str, Any], rules: List[Dict[str, Any]],
     contractor_range = rng(col_of.get("contractor"))
     contractors = effective if contractor_mode != "none" else None
 
-    subtitle = "%s · %d ملف تنفيذ · %d منفّذة و%d جاري العمل من %d" % (
-        datetime.now().strftime("%Y-%m-%d"), len(an["sec_names"]),
-        states.count(ST_DONE), states.count(ST_WIP), len(rows))
+    # كل رقم محفوف بكلمات عربية والتاريخ في آخر السطر مسبوقًا بكلمة: السطر
+    # المختلط في اتجاه RTL يعيد ترتيب مقاطعه إذا بدأ برقم أو فصلت بينها نقاط
+    subtitle = ("إجمالي الملاحظات %d، المنفّذ %d، جاري العمل %d، من %d ملف تنفيذ، بتاريخ %s"
+                % (len(rows), states.count(ST_DONE), states.count(ST_WIP),
+                   len(an["sec_names"]), datetime.now().strftime("%Y-%m-%d")))
 
     def sheets_factory(st: Styles):
         s = make_styles(st)
@@ -707,7 +721,7 @@ def build_output(an: Dict[str, Any], rules: List[Dict[str, Any]],
     total_cols = n_cols + len(new_columns)
     sqref = "A%d:%s%d" % (first_row, xlsxedit.col_letter(total_cols - 1), last_row)
     matched = set(an["sources"])          # ما ورد في ملفات التنفيذ (الآن أو سابقًا)
-    fills = column_fills(rules, rows, nums, matched)
+    fills = static_fills(rules, rows, states, nums, matched)
 
     xlsxedit.write_patched(
         src_path, out_path,
@@ -718,10 +732,7 @@ def build_output(an: Dict[str, Any], rules: List[Dict[str, Any]],
                     EXEC_STATES),
         sheets_factory=sheets_factory)
 
-    colored_states = {r["key"] for r in rules if r.get("kind") == "state"
-                      and COLOR_HEX.get(r.get("color") or "")}
-    colored = len(set(fills) | {nums[i] for i, st in enumerate(states)
-                                if st in colored_states})
+    colored = len(fills)
     n_done = states.count(ST_DONE)
     n_wip = states.count(ST_WIP)
     return {

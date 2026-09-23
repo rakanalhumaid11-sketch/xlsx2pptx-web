@@ -5,7 +5,7 @@ approval.py
 متابعة حالة الاعتماد من ملف واحد — بلا ملفات ثانوية.
 
 يقرأ عمود الحالة في ملف الملاحظات ويترجم رموزه (APPROVED / ASSIGNED / …)
-إلى أربع خانات يفهمها المتابع: موافق عليه، منجز بانتظار الموافقة، معاد،
+إلى أربع خانات يفهمها المتابع: تم الاقفال، تمت المعالجة، مسترجع،
 بانتظار المعالجة. ثم يضيف في آخر الملف عمود «حالة الاعتماد» بقائمة منسدلة
 ليعدّله المستخدم بيده، ويلوّن الصفوف تنسيقًا شرطيًا، ويبني داتا شيت حيًّا
 حسب المقاول والتصنيف والأولوية.
@@ -15,7 +15,8 @@ approval.py
 """
 
 import os
-from datetime import datetime
+import re
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import engine
@@ -26,11 +27,20 @@ from xlsxedit import SheetBuilder, Styles
 
 # ------------------------------------------------------------------ ثوابت
 
-AP_APPROVED = "موافق عليه"
-AP_DONE = "منجز بانتظار الموافقة"
-AP_RETURNED = "معاد"
+AP_APPROVED = "تم الاقفال"
+AP_DONE = "تمت المعالجة"
+AP_RETURNED = "مسترجع"
 AP_PENDING = "بانتظار المعالجة"
 AP_STATES = [AP_APPROVED, AP_DONE, AP_RETURNED, AP_PENDING]
+
+# تسميات جولات سابقة — تُترجم للجديدة كي لا تضيع التعديلات اليدوية القديمة
+LEGACY_STATES = {
+    "موافق عليه": AP_APPROVED,
+    "موافق عليها": AP_APPROVED,
+    "موافق عليها (تم الاقفال)": AP_APPROVED,
+    "منجز بانتظار الموافقة": AP_DONE,
+    "معاد": AP_RETURNED,
+}
 
 AP_HEADER = "حالة الاعتماد"
 AP_ALIASES = [AP_HEADER, "حاله الاعتماد"]
@@ -67,11 +77,11 @@ def guess_bucket(raw: Any) -> str:
     if code in CODE_MAP:
         return CODE_MAP[code]
     ar = engine.normalize_ar(t)
-    if any(w in ar for w in ("موافق", "معتمد", "مقبول", "مغلق")):
+    if any(w in ar for w in ("موافق", "معتمد", "مقبول", "مغلق", "اقفال", "مقفل")):
         return AP_APPROVED
-    if any(w in ar for w in ("معاد", "مرفوض", "مرتجع", "اعاده")):
+    if any(w in ar for w in ("معاد", "مرفوض", "مرتجع", "مسترجع", "اعاده")):
         return AP_RETURNED
-    if any(w in ar for w in ("منجز", "منفذ", "مكتمل", "تم ")):
+    if any(w in ar for w in ("منجز", "منفذ", "مكتمل", "تمت", "تم ")):
         return AP_DONE
     return AP_PENDING
 
@@ -141,6 +151,9 @@ def resolve(an: Dict[str, Any], mapping: Dict[str, str]) -> List[str]:
         if prev in AP_STATES:
             out.append(prev)          # إدخال يدوي سابق يُحترم ولا يُداس
             continue
+        if prev in LEGACY_STATES:
+            out.append(LEGACY_STATES[prev])
+            continue
         raw = (_clean(r[an["status_col"]])
                if an["status_col"] is not None and an["status_col"] < len(r) else "")
         key = raw or "(فارغة)"
@@ -150,21 +163,40 @@ def resolve(an: Dict[str, Any], mapping: Dict[str, str]) -> List[str]:
 
 # ------------------------------------------------------------------ الداتا شيت
 
-HEAD = ["القيمة", "الإجمالي"] + AP_STATES + ["نسبة الاعتماد"]
-WIDTHS = [(0, 2.5), (1, 26), (2, 12), (3, 13), (4, 17), (5, 11), (6, 16), (7, 14), (8, 2.5)]
+HEAD = ["القيمة", "الإجمالي"] + AP_STATES + ["نسبة الإنجاز"]
+WIDTHS = [(0, 2.5), (1, 26), (2, 12), (3, 15), (4, 15), (5, 12), (6, 17), (7, 14), (8, 2.5)]
+
+# كل بطاقة مؤشر تقف فوق العمود الذي تلخّصه في الجداول، فيقرأ العين عموديًا.
+# بطاقة الإجمالي وحدها تُمدّ على عمودين لأن أولها (عمود القيمة) لا مؤشر له.
+KPI_SPAN = [(1, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7)]
+# خلية كل مؤشر: الإجمالي ثم الخانات الأربع بترتيب أعمدة الجدول
+KPI_CELL = ["B6", "D6", "E6", "F6", "G6"]
 
 
-def _counts(values: List[str], buckets: List[str]) -> List[Tuple[str, List[int]]]:
-    """(القيمة، [الإجمالي، موافق، منجز، معاد، بانتظار]) تنازليًا حسب الإجمالي."""
+_EPOCH = datetime(1899, 12, 30)
+_DATE_TEXT = re.compile(r"(\d{4}-\d{2}-\d{2})[ T]\d{2}:\d{2}:\d{2}(\.\d+)?")
+
+
+def _excel_date(v: Any) -> Optional[float]:
+    """تاريخ إكسل رقمًا — كي يُعرض «2026-09-03» لا «2026-09-03 00:00:00»."""
+    if isinstance(v, datetime):
+        return (v - _EPOCH).days + (v.hour * 3600 + v.minute * 60 + v.second) / 86400.0
+    if isinstance(v, date):
+        return (datetime(v.year, v.month, v.day) - _EPOCH).days
+    return None
+
+
+def _counts(raw: List[Any], buckets: List[str]) -> List[Tuple[str, Any, List[int]]]:
+    """(النص، القيمة الأصلية، [الإجمالي، مقفل، معالَج، مسترجع، بانتظار])."""
     agg: Dict[str, List[Any]] = {}
-    for v, b in zip(values, buckets):
-        label = v or "(غير محدد)"
+    for v, b in zip(raw, buckets):
+        label = _clean(v) or "(غير محدد)"
         key = engine.normalize_ar(label) or label
-        slot = agg.setdefault(key, [label, [0, 0, 0, 0, 0]])
-        slot[1][0] += 1
-        slot[1][1 + AP_STATES.index(b)] += 1
-    return sorted(((v[0], v[1]) for v in agg.values()),
-                  key=lambda t: (t[0] == "(غير محدد)", -t[1][0]))
+        slot = agg.setdefault(key, [label, v, [0, 0, 0, 0, 0]])
+        slot[2][0] += 1
+        slot[2][1 + AP_STATES.index(b)] += 1
+    return sorted(((v[0], v[1], v[2]) for v in agg.values()),
+                  key=lambda t: (t[0] == "(غير محدد)", -t[2][0]))
 
 
 def _table(sb: SheetBuilder, s: Dict[str, int], row: int, title: str,
@@ -178,24 +210,35 @@ def _table(sb: SheetBuilder, s: Dict[str, int], row: int, title: str,
     sb.height(row, 30)
     first = row + 1
 
-    for k, (label, n) in enumerate(data):
+    for k, (label, raw, n) in enumerate(data):
         row += 1
         alt = k % 2 == 1
-        sb.set(row, 1, label, s["name_b"] if alt else s["name"])
+        crit = "$B%d" % row
+        serial = _excel_date(raw)
+        stamp = _DATE_TEXT.fullmatch(label)
+        if serial is not None:                  # تاريخ حقيقي: يُكتب قيمة ويُنسّق
+            sb.set(row, 1, serial, s["date_b"] if alt else s["date"])
+        elif stamp:
+            # التاريخ مخزَّن نصًّا مع وقت («… 00:00:00»): نعرض اليوم وحده،
+            # ونطابق ببادئة كي يبقى العدّ صحيحًا رغم اختلاف النص المعروض
+            sb.set(row, 1, stamp.group(1), s["name_b"] if alt else s["name"])
+            crit = '$B%d&"*"' % row
+        else:
+            sb.set(row, 1, label, s["name_b"] if alt else s["name"])
         # صف «(غير محدد)» يُحسب طرحًا لا بـ COUNTIFS بمعيار فارغ: المعيار
         # الفارغ يعدّ الصفوف الخالية أسفل البيانات أيضًا فيتضخّم الرقم.
         blank = label == "(غير محدد)"
         for j in range(5):            # الإجمالي + الحالات الأربع
             col = 2 + j
-            kpi = "%s$6" % xlsxedit.col_letter(1 + j)
+            kpi = KPI_CELL[j].replace("6", "$6")
             if blank:
                 f = ("%s-SUM(%s%d:%s%d)" % (kpi, xlsxedit.col_letter(col), first,
                                             xlsxedit.col_letter(col), row - 1)
                      if row > first else kpi)
             elif j == 0:
-                f = "COUNTIFS(%s,$B%d)" % (src, row)
+                f = "COUNTIFS(%s,%s)" % (src, crit)
             else:
-                f = "COUNTIFS(%s,$B%d,%s,%s)" % (src, row, ap, _q(AP_STATES[j - 1]))
+                f = "COUNTIFS(%s,%s,%s,%s)" % (src, crit, ap, _q(AP_STATES[j - 1]))
             sb.set(row, col, n[j], s["td_b"] if alt else s["td"], formula=f)
         sb.set(row, 7, (n[1] / n[0]) if n[0] else 0.0, s["pct_b"] if alt else s["pct"],
                formula="IFERROR(D%d/C%d,0)" % (row, row))
@@ -205,9 +248,33 @@ def _table(sb: SheetBuilder, s: Dict[str, int], row: int, title: str,
     return row + 2
 
 
+def kpi_styles(st: Styles, colors: Dict[str, str]) -> Tuple[List[int], List[int]]:
+    """أنماط بطاقات المؤشرات: شريط علوي بلون الخانة، ورقمها بلون مناسب.
+
+    هكذا يصير الشريط نفسه دليل ألوان: من يفتح الملف يربط لون الصف بخانته
+    دون شرح."""
+    f_lbl = st.font(10, False, MUTED)
+    f_num = st.font(20, True, INK)
+    f_ok = st.font(20, True, GREEN)
+    f_bad = st.font(20, True, "B03A3A")
+    fl = st.fill(SOFT)
+    pct = st.numfmt("0%")
+    num = st.numfmt("#,##0")
+
+    labels, nums = [], []
+    accents = [INK] + [COLOR_HEX.get(colors.get(x) or "", "C9D4DF") for x in AP_STATES] + [INK]
+    fonts = [f_num, f_ok, f_num, f_bad, f_num, f_num]
+    for i, accent in enumerate(accents):
+        top = st.border("FFFFFF", sides="lr", thick_top=accent)
+        bot = st.border("FFFFFF", sides="lrb")
+        labels.append(st.xf(f_lbl, fl, top, halign="center"))
+        nums.append(st.xf(fonts[i], fl, bot, pct if i == 5 else num, halign="center"))
+    return labels, nums
+
+
 def build_datasheet(s: Dict[str, int], an: Dict[str, Any], buckets: List[str],
                     groups: List[Tuple[str, int]], ap_range: str,
-                    col_range) -> SheetBuilder:
+                    col_range, kpi: Tuple[List[int], List[int]]) -> SheetBuilder:
     sb = SheetBuilder(tab_color=INK, landscape=True)
     for c, w in WIDTHS:
         sb.width(c, w)
@@ -222,36 +289,39 @@ def build_datasheet(s: Dict[str, int], an: Dict[str, Any], buckets: List[str],
         title += " — " + an["feeder"]
     band(sb, 2, 1, 7, title, s["title"])
     sb.height(2, 36)
-    band(sb, 3, 1, 7, "%s · %d ملاحظة · %d موافق عليها (%.0f%%)" % (
-        datetime.now().strftime("%Y-%m-%d"), total, n[0],
-        100.0 * n[0] / total if total else 0), s["sub"])
+    # كل رقم محفوف بكلمات عربية والتاريخ في آخر السطر مسبوقًا بكلمة: السطر
+    # المختلط في اتجاه RTL يعيد ترتيب مقاطعه إذا بدأ برقم أو فصلت بينها نقاط
+    band(sb, 3, 1, 7, "إجمالي الملاحظات %d، %s %d، نسبة الإنجاز %.0f٪، بتاريخ %s"
+         % (total, AP_APPROVED, n[0], 100.0 * n[0] / total if total else 0,
+            datetime.now().strftime("%Y-%m-%d")), s["sub"])
     sb.height(3, 20)
     sb.height(4, 10)
     sb.set(4, 1, None, s["spacer"])
 
-    # شريط المؤشرات: ستّ بطاقات، الأخيرة (النسبة) على عمودين
-    labels = ["إجمالي الملاحظات"] + AP_STATES
-    values = [total] + n
-    styles = [s["kpi_num"], s["kpi_ok"], s["kpi_num"], s["kpi_num"], s["kpi_num"]]
-    formulas = ["COUNTA(%s)" % ap_range] + [
-        "COUNTIF(%s,%s)" % (ap_range, _q(st)) for st in AP_STATES]
-    for j in range(5):
-        sb.set(5, 1 + j, labels[j], s["kpi_lbl"])
-        sb.set(6, 1 + j, values[j], styles[j], formula=formulas[j])
-    band(sb, 5, 6, 7, "نسبة الاعتماد", s["kpi_lbl"])
-    sb.set(6, 6, (n[0] / total) if total else 0.0, s["kpi_pct"],
-           formula="IFERROR(C6/B6,0)")
-    sb.set(6, 7, None, s["kpi_pct"])
-    sb.merge(6, 6, 6, 7)
-    sb.height(5, 26)
+    # شريط المؤشرات: كل بطاقة فوق عمودها، وشريطها العلوي بلون خانتها
+    kpi_lbl, kpi_num = kpi
+    labels = ["إجمالي الملاحظات"] + AP_STATES + ["نسبة الإنجاز"]
+    values = [total] + n + [(n[0] / total) if total else 0.0]
+    formulas = (["COUNTA(%s)" % ap_range]
+                + ["COUNTIF(%s,%s)" % (ap_range, _q(st)) for st in AP_STATES]
+                + ["IFERROR(%s/%s,0)" % (KPI_CELL[1], KPI_CELL[0])])
+    for j, (c1, c2) in enumerate(KPI_SPAN):
+        band(sb, 5, c1, c2, labels[j], kpi_lbl[j])
+        band(sb, 6, c1, c2, None, kpi_num[j])
+        sb.set(6, c1, values[j], kpi_num[j], formula=formulas[j])
+    sb.height(5, 32)
     sb.height(6, 34)
     sb.height(7, 14)
     sb.set(7, 1, None, s["spacer"])
 
     row = 8
-    for label, col in groups:
-        vals = [_clean(r[col]) if col < len(r) else "" for r in an["rows"]]
+    for k, (label, col) in enumerate(groups):
+        vals = [r[col] if col < len(r) else None for r in an["rows"]]
         data = _counts(vals, buckets)
+        # في الجداول التالية للأول: صف «(غير محدد)» بلا إقفال ولا معالجة ولا
+        # استرجاع لا يضيف شيئًا فيُحذف. ويبقى في الجدول الأول لاكتمال التوزيع.
+        if k and data and data[-1][0] == "(غير محدد)" and sum(data[-1][2][1:4]) == 0:
+            data = data[:-1]
         if data:
             row = _table(sb, s, row, label, data, col_range(col), ap_range)
     return sb
@@ -301,17 +371,24 @@ def build_output(an: Dict[str, Any], mapping: Dict[str, str],
     def sheets_factory(st: Styles):
         s = make_styles(st)
         return [("الداتا شيت",
-                 build_datasheet(s, an, buckets, groups, ap_range, col_range))]
+                 build_datasheet(s, an, buckets, groups, ap_range, col_range,
+                                 kpi_styles(st, colors)))]
 
     cf = [("$%s%d=%s" % (ap_letter, first_row, _q(state)), COLOR_HEX[colors[state]])
           for state in AP_STATES if colors.get(state) in COLOR_HEX]
+
+    # تعبئة ثابتة تحت التنسيق الشرطي: عارضات الجوال البسيطة (واتساب) لا تعرض
+    # التنسيق الشرطي، فيصل الملف بلا ألوان لمن ليس عنده إكسل. وفي إكسل يغطّيها
+    # التنسيق الشرطي فيبقى اللون حيًّا مع التعديل اليدوي.
+    fills = {nums[i]: COLOR_HEX[colors[b]]
+             for i, b in enumerate(buckets) if colors.get(b) in COLOR_HEX}
     total_cols = n_cols + len(new_columns)
     sqref = "A%d:%s%d" % (first_row, xlsxedit.col_letter(total_cols - 1), last_row)
 
     xlsxedit.write_patched(
         src_path, out_path,
         sheet_name=an["sheet"], header_row=an["header_row"], n_cols=n_cols,
-        cell_values=cell_values, new_columns=new_columns,
+        cell_values=cell_values, new_columns=new_columns, row_fills=fills,
         cf=(sqref, cf),
         validation=("%s%d:%s%d" % (ap_letter, first_row, ap_letter, last_row),
                     AP_STATES),

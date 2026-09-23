@@ -525,7 +525,7 @@ def build_datasheet(s: Dict[str, int], an: Dict[str, Any], states: List[str],
                     contractors: Optional[List[str]], subtitle: str,
                     exec_range: str, class_range: str,
                     contractor_range: str) -> SheetBuilder:
-    sb = SheetBuilder(tab_color=INK)
+    sb = SheetBuilder(tab_color=INK, selected=True, centered=True)
     for c, w in ((0, 2.5), (1, 24), (2, 13), (3, 13), (4, 14), (5, 13), (6, 17), (7, 2.5)):
         sb.width(c, w)
 

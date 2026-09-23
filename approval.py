@@ -5,7 +5,7 @@ approval.py
 متابعة حالة الاعتماد من ملف واحد — بلا ملفات ثانوية.
 
 يقرأ عمود الحالة في ملف الملاحظات ويترجم رموزه (APPROVED / ASSIGNED / …)
-إلى أربع خانات يفهمها المتابع: تم الاقفال، تمت المعالجة، مسترجع،
+إلى أربع خانات يفهمها المتابع: تم الاقفال، بانتظار الاقفال، مسترجع،
 بانتظار المعالجة. ثم يضيف في آخر الملف عمود «حالة الاعتماد» بقائمة منسدلة
 ليعدّله المستخدم بيده، ويلوّن الصفوف تنسيقًا شرطيًا، ويبني داتا شيت حيًّا
 حسب المقاول والتصنيف والأولوية.
@@ -28,7 +28,7 @@ from xlsxedit import SheetBuilder, Styles
 # ------------------------------------------------------------------ ثوابت
 
 AP_APPROVED = "تم الاقفال"
-AP_DONE = "تمت المعالجة"
+AP_DONE = "بانتظار الاقفال"
 AP_RETURNED = "مسترجع"
 AP_PENDING = "بانتظار المعالجة"
 AP_STATES = [AP_APPROVED, AP_DONE, AP_RETURNED, AP_PENDING]
@@ -39,6 +39,7 @@ LEGACY_STATES = {
     "موافق عليها": AP_APPROVED,
     "موافق عليها (تم الاقفال)": AP_APPROVED,
     "منجز بانتظار الموافقة": AP_DONE,
+    "تمت المعالجة": AP_DONE,
     "معاد": AP_RETURNED,
 }
 
@@ -73,6 +74,12 @@ def guess_bucket(raw: Any) -> str:
     t = _clean(raw)
     if not t:
         return AP_PENDING
+    # المطابقة التامة أولًا: «بانتظار الاقفال» تحوي كلمة «اقفال» فلو فحصنا
+    # الكلمات المفتاحية قبلها لصُنّفت خطأً على أنها مقفلة
+    if t in AP_STATES:
+        return t
+    if t in LEGACY_STATES:
+        return LEGACY_STATES[t]
     code = t.strip().upper().replace(" ", "_").replace("-", "_")
     if code in CODE_MAP:
         return CODE_MAP[code]
@@ -275,7 +282,7 @@ def kpi_styles(st: Styles, colors: Dict[str, str]) -> Tuple[List[int], List[int]
 def build_datasheet(s: Dict[str, int], an: Dict[str, Any], buckets: List[str],
                     groups: List[Tuple[str, int]], ap_range: str,
                     col_range, kpi: Tuple[List[int], List[int]]) -> SheetBuilder:
-    sb = SheetBuilder(tab_color=INK, landscape=True)
+    sb = SheetBuilder(tab_color=INK, landscape=True, selected=True, centered=True)
     for c, w in WIDTHS:
         sb.width(c, w)
 

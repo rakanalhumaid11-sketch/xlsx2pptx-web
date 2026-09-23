@@ -252,11 +252,16 @@ class SheetBuilder:
     """يبني XML ورقة جديدة من خلايا بسيطة (نصوص وأرقام) بأنماط معطاة."""
 
     def __init__(self, rtl: bool = True, gridlines: bool = False,
-                 tab_color: str = "", landscape: bool = False):
+                 tab_color: str = "", landscape: bool = False,
+                 selected: bool = False, centered: bool = False):
         self.rtl = rtl
         self.gridlines = gridlines
         self.tab_color = tab_color
         self.landscape = landscape
+        # الورقة المحدَّدة هي ما يصدّره إكسل عند «حفظ كـ PDF»، والتوسيط يجعل
+        # الصفحة المطبوعة متّزنة بدل أن تلتصق بحافة
+        self.selected = selected
+        self.centered = centered
         self.cells: Dict[Tuple[int, int], Tuple[Any, Optional[int], str]] = {}
         self.merges: List[str] = []
         self.widths: Dict[int, float] = {}
@@ -334,10 +339,10 @@ class SheetBuilder:
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
             '<worksheet xmlns="%s" xmlns:r="%s">'
             '%s<dimension ref="%s"/>'
-            '<sheetViews><sheetView%s%s workbookViewId="0"/></sheetViews>'
+            '<sheetViews><sheetView%s%s%s workbookViewId="0"/></sheetViews>'
             '<sheetFormatPr defaultRowHeight="16.5"/>'
             '%s<sheetData>%s</sheetData>%s%s'
-            '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5"'
+            '%s<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5"'
             ' header="0.3" footer="0.3"/>'
             '<pageSetup orientation="%s" fitToWidth="1" fitToHeight="0"/>'
             '</worksheet>' % (
@@ -348,7 +353,9 @@ class SheetBuilder:
                     if self.tab_color else ""), dim,
                 ' rightToLeft="1"' if self.rtl else "",
                 ' showGridLines="0"' if not self.gridlines else "",
+                ' tabSelected="1"' if self.selected else "",
                 cols_xml, "".join(body), merges, cf,
+                '<printOptions horizontalCentered="1"/>' if self.centered else "",
                 "landscape" if self.landscape else "portrait"))
 
 
@@ -647,6 +654,15 @@ def write_patched(src_path: str, dst_path: str, *, sheet_name: str,
         else:
             wb_xml = wb_xml.replace(
                 "</workbook>", '<calcPr fullCalcOnLoad="1"/></workbook>', 1)
+
+        # ورقة واحدة محدَّدة فقط: تعدّد التحديد يجمع الأوراق فيطبعها إكسل كلها
+        if any(b.selected for _t, b in extra_sheets):
+            sheet_xml = re.sub(r'\s+tabSelected="1"', "", sheet_xml, count=1)
+            n_before = len(re.findall(r"<sheet\b[^>]*?/>", wb_xml))
+            m = re.search(r"<workbookView\b[^>]*?/>", wb_xml)
+            if m:
+                wb_xml = wb_xml.replace(
+                    m.group(0), _set_attr(m.group(0), "activeTab", str(n_before)), 1)
 
         new_parts: Dict[str, str] = {}
         taken = set(names)

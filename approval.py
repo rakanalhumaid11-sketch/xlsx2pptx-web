@@ -155,16 +155,15 @@ def resolve(an: Dict[str, Any], mapping: Dict[str, str]) -> List[str]:
     for r in an["rows"]:
         prev = (_clean(r[an["prev_col"]])
                 if an["prev_col"] is not None and an["prev_col"] < len(r) else "")
-        if prev in AP_STATES:
-            out.append(prev)          # إدخال يدوي سابق يُحترم ولا يُداس
-            continue
-        if prev in LEGACY_STATES:
-            out.append(LEGACY_STATES[prev])
-            continue
+        prev = prev if prev in AP_STATES else LEGACY_STATES.get(prev, "")
+
         raw = (_clean(r[an["status_col"]])
                if an["status_col"] is not None and an["status_col"] < len(r) else "")
-        key = raw or "(فارغة)"
-        out.append(mapping.get(key) or guess_bucket(raw))
+        now = mapping.get(raw or "(فارغة)") or guess_bucket(raw)
+
+        # الإدخال اليدوي السابق يُحترم، إلا أن يكون النظام قد حسم الأمر بعده
+        # (إقفال أو استرجاع) — وإلا بقي الملف يعرض حالة قديمة بعد التحديث
+        out.append(now if (not prev or now in (AP_APPROVED, AP_RETURNED)) else prev)
     return out
 
 

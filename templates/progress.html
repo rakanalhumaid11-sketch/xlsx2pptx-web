@@ -82,8 +82,11 @@ function poll() {
         "<li><span>عدد الملاحظات</span><b>" + (r.records || 0) + "</b></li>" +
         "<li><span>أنواع الملاحظات</span><b>" + (r.types || 0) + "</b></li>" +
         "<li><span>إجمالي الشرائح</span><b>" + (r.slides || 0) + "</b></li>" +
-        "<li><span>صور أُدرجت</span><b>" + (r.photos_ok || 0) +
-        (r.photos_missing ? " — بدون صورة: " + r.photos_missing : "") + "</b></li>";
+        "<li><span>صور «قبل»</span><b>" + (r.photos_ok || 0) +
+        (r.photos_missing ? " — بدون صورة: " + r.photos_missing : "") + "</b></li>" +
+        "<li><span>صور «بعد»</span><b>" + (r.after_ok || 0) +
+        ((r.records - (r.after_ok || 0)) > 0
+          ? " — خانة فارغة: " + (r.records - (r.after_ok || 0)) : "") + "</b></li>";
       document.getElementById("downloadBox").style.display = "block";
       return;
     }

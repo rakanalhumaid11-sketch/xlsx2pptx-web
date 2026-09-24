@@ -52,6 +52,8 @@ COLUMN_ALIASES: Dict[str, List[str]] = {
                "صورة قبل 1", "صوره قبل 1", "صورة قبل1"],
     "photo2": ["صورة 2", "صورة2", "الصورة 2", "صوره 2",
                "صورة قبل 2", "صوره قبل 2", "صورة قبل2"],
+    # صار النظام يصدّر صور ما بعد المعالجة أيضًا، فتُملأ خانة «بعد» من الملف
+    "photo_after": ["صورة بعد 1", "صوره بعد 1", "صورة بعد1"],
     "status": ["حالة الملاحظة", "حالة الملاحظه", "الحالة"],
     "inspect_date": ["تاريخ الفحص", "التاريخ"],
     "contractor": ["المقاول", "اسم المقاول", "الشركة", "الشركه", "المنفذ",
@@ -395,8 +397,9 @@ _UNSET = object()
 
 
 def fill_note(slide, rec: Dict[str, str], feeder: str, notice: str,
-              images: Optional["ImageSource"] = None, img=_UNSET) -> bool:
-    """يملأ شريحة ملاحظة واحدة وينزّل صورتها. يرجع True إذا وُضعت صورة."""
+              images: Optional["ImageSource"] = None, img=_UNSET,
+              img_after=_UNSET) -> Tuple[bool, bool]:
+    """يملأ شريحة ملاحظة واحدة بصورتَي «قبل» و«بعد». يرجع (وُضعت قبل، وُضعت بعد)."""
     header = "صيانة المغذي"
     if feeder:
         header += f" {feeder}"
@@ -418,22 +421,32 @@ def fill_note(slide, rec: Dict[str, str], feeder: str, notice: str,
             if url:
                 engine.set_hyperlink(coords_shape, url)
 
-    # صورة "قبل" فقط؛ خانة "بعد" تبقى فارغة دائمًا (لا يوجد شكل صورة فيها أصلًا)
+    def fetch(url, cached):
+        if cached is not _UNSET:
+            return cached
+        if images is not None:
+            return images.get(url)
+        return engine.download_image(url) if url.startswith("http") else None
+
+    # خانة «بعد»: إطار بلا شكل صورة، فنُدرج الصورة داخله عند توفّرها في الملف
+    after_ok = False
+    frame = find(slide, "PH_FRAME_AFTER")
+    after = fetch(rec.get("photo_after", ""), img_after)
+    if frame is not None and after:
+        engine.insert_picture_in_box(slide, frame.left, frame.top,
+                                     frame.width, frame.height, after)
+        after_ok = True
+
     box = find(slide, "PH_PHOTO_BEFORE")
     if box is None:
-        return False
-    url = rec.get("photo1", "")
-    if img is _UNSET:
-        if images is not None:
-            img = images.get(url)
-        else:
-            img = engine.download_image(url) if url.startswith("http") else None
+        return False, after_ok
+    img = fetch(rec.get("photo1", ""), img)
     if img:
         engine.replace_picture_shape(slide, box, img)
-        return True
+        return True, after_ok
     # لا صورة متاحة: نحذف العنصر النائب فتبقى الخانة فارغة بدل تكرار صورة القالب
     engine.remove_shape(box)
-    return False
+    return False, after_ok
 
 
 # --------------------------------------------------------------- نقطة الدخول
@@ -465,18 +478,23 @@ def _build_one(out_path: str, part_records: List[Dict[str, str]], feeder: str,
 
     note_indices: List[int] = []
     photos_ok = 0
+    after_ok = 0
     total = len(part_records)
     # نعالج على دفعات: ننزّل صور الدفعة بالتوازي ثم نبني شرائحها ونتخلص منها،
     # فلا تتراكم الصور في الذاكرة مهما كان عدد الملاحظات.
     for start in range(0, total, CHUNK):
         chunk = part_records[start:start + CHUNK]
-        blobs = images.get_many([r.get("photo1", "") for r in chunk])
+        blobs = images.get_many([r.get(k, "") for r in chunk
+                                 for k in ("photo1", "photo_after")])
         for j, rec in enumerate(chunk):
             idx = _dup(prs, IDX_NOTE)
             note_indices.append(idx)
             img = blobs.get((rec.get("photo1", "") or "").strip())
-            if fill_note(prs.slides[idx], rec, feeder, notice, images, img=img):
-                photos_ok += 1
+            aft = blobs.get((rec.get("photo_after", "") or "").strip())
+            before, after = fill_note(prs.slides[idx], rec, feeder, notice,
+                                      images, img=img, img_after=aft)
+            photos_ok += before
+            after_ok += after
             if progress_cb:
                 progress_cb(offset + start + j + 1, grand_total or total)
         blobs.clear()
@@ -484,7 +502,8 @@ def _build_one(out_path: str, part_records: List[Dict[str, str]], feeder: str,
     final_order = [IDX_COVER] + summary_indices + note_indices + [IDX_THANKS]
     engine.rebuild_slide_order(prs, final_order, [IDX_NOTE])
     prs.save(out_path)
-    return {"slides": len(final_order), "photos_ok": photos_ok, "summary_slides": n_summary}
+    return {"slides": len(final_order), "photos_ok": photos_ok,
+            "after_ok": after_ok, "summary_slides": n_summary}
 
 
 def build_report(excel_path: str, out_path: str, notice: str = "",
@@ -513,12 +532,13 @@ def build_report(excel_path: str, out_path: str, notice: str = "",
 
     work_dir = os.path.join(os.path.dirname(out_path), "parts")
     produced: List[str] = []
-    slides_total, photos_ok, n_summary = 0, 0, 1
+    slides_total, photos_ok, after_ok, n_summary = 0, 0, 0, 1
     try:
         if n_parts == 1:
             st = _build_one(out_path, records, feeder, notice, counts, totals,
                             images, (1, 1), progress_cb, 0, len(records))
-            slides_total, photos_ok, n_summary = st["slides"], st["photos_ok"], st["summary_slides"]
+            slides_total, photos_ok = st["slides"], st["photos_ok"]
+            after_ok, n_summary = st["after_ok"], st["summary_slides"]
             produced.append(out_path)
         else:
             os.makedirs(work_dir, exist_ok=True)
@@ -531,6 +551,7 @@ def build_report(excel_path: str, out_path: str, notice: str = "",
                                 i * max_per, len(records))
                 slides_total += st["slides"]
                 photos_ok += st["photos_ok"]
+                after_ok += st["after_ok"]
                 n_summary = st["summary_slides"]
                 produced.append(path)
                 gc.collect()   # نحرّر ذاكرة الجزء قبل بدء التالي
@@ -553,6 +574,7 @@ def build_report(excel_path: str, out_path: str, notice: str = "",
         "is_zip": is_zip,
         "photos_ok": photos_ok,
         "photos_missing": len(records) - photos_ok,
+        "after_ok": after_ok,
         "photos_from_file": images.from_file,
         "photos_from_web": images.from_web,
         "feeder": feeder,

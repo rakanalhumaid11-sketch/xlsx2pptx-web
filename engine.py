@@ -579,8 +579,10 @@ def prefetch_images(urls: List[str], max_workers: int = 16, progress_cb=None) ->
 # دقة الطباعة المستهدفة داخل صندوق الصورة. صور الجوال أكبر بكثير مما يحتاجه
 # صندوق بعرض ٢.٧ بوصة، وتخزينها بحجمها الكامل يضخّم الملف والذاكرة بلا فائدة
 # مرئية: عند ٣٠٠ نقطة/بوصة تبقى جودة الطباعة كاملة.
-TARGET_DPI = 300
-JPEG_QUALITY = 82
+# 220 مقيسة: ذروة الذاكرة 284 ميجا لستمئة ملاحظة في ملف واحد،
+# والصورة 586×782 بكسل — نص الإحداثيات على الصورة يبقى مقروءًا
+TARGET_DPI = int(os.environ.get("TARGET_DPI", "220"))
+JPEG_QUALITY = int(os.environ.get("JPEG_QUALITY", "82"))
 
 
 def prepare_image_for_box(image_bytes: bytes, box_w: int, box_h: int):

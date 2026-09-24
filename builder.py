@@ -516,12 +516,6 @@ def build_report(excel_path: str, out_path: str, notice: str = "",
     counts = note_counts(records)
     totals = {"total": len(records), "types": len(counts), "done": 0}
 
-    # الخادم المجاني عنده ذاكرة محدودة (512 ميجا)، وكل شريحة تبقى في الذاكرة
-    # حتى يُحفظ الملف. لذلك نبني التقارير الكبيرة على أجزاء: كل جزء يُحفظ
-    # وتُحرَّر ذاكرته قبل أن يبدأ التالي، فتبقى الذروة ثابتة مهما كبر العدد.
-    max_per = max(1, int(os.environ.get("MAX_NOTES_PER_FILE", "250")))
-    n_parts = 1 if len(records) <= max_per else (len(records) + max_per - 1) // max_per
-
     images = ImageSource(excel_path)
     if progress_cb:
         # نُبلّغ مصدر الصور مبكرًا: القراءة من داخل الملف تستغرق ثوانٍ، أما
@@ -530,51 +524,24 @@ def build_report(excel_path: str, out_path: str, notice: str = "",
         embedded = sum(1 for r in records[:20] if r.get("photo1") in images.map)
         progress_cb(0, len(records), "file" if embedded > 10 else "web")
 
-    work_dir = os.path.join(os.path.dirname(out_path), "parts")
-    produced: List[str] = []
-    slides_total, photos_ok, after_ok, n_summary = 0, 0, 0, 1
+    # المخرج ملف بوربوينت واحد دائمًا مهما كبر عدد الملاحظات. الذروة مقيسة:
+    # نحو 190 ميجا ثابتة لبنية 600 شريحة + حجم الصور بعد التصغير، أي ~285 ميجا
+    # لستمئة ملاحظة — دون سقف الخادم (512) بهامش مريح.
     try:
-        if n_parts == 1:
-            st = _build_one(out_path, records, feeder, notice, counts, totals,
-                            images, (1, 1), progress_cb, 0, len(records))
-            slides_total, photos_ok = st["slides"], st["photos_ok"]
-            after_ok, n_summary = st["after_ok"], st["summary_slides"]
-            produced.append(out_path)
-        else:
-            os.makedirs(work_dir, exist_ok=True)
-            for i in range(n_parts):
-                part_records = records[i * max_per:(i + 1) * max_per]
-                name = f"تقرير_{feeder or 'المغذي'}_جزء{i + 1}.pptx"
-                path = os.path.join(work_dir, name)
-                st = _build_one(path, part_records, feeder, notice, counts, totals,
-                                images, (i + 1, n_parts), progress_cb,
-                                i * max_per, len(records))
-                slides_total += st["slides"]
-                photos_ok += st["photos_ok"]
-                after_ok += st["after_ok"]
-                n_summary = st["summary_slides"]
-                produced.append(path)
-                gc.collect()   # نحرّر ذاكرة الجزء قبل بدء التالي
+        st = _build_one(out_path, records, feeder, notice, counts, totals,
+                        images, (1, 1), progress_cb, 0, len(records))
     finally:
         images.close()
-
-    is_zip = len(produced) > 1
-    if is_zip:
-        with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as z:
-            for p in produced:
-                z.write(p, os.path.basename(p))
-        shutil.rmtree(work_dir, ignore_errors=True)
+    gc.collect()
 
     return {
         "records": len(records),
         "types": len(counts),
-        "slides": slides_total,
-        "summary_slides": n_summary,
-        "parts": len(produced),
-        "is_zip": is_zip,
-        "photos_ok": photos_ok,
-        "photos_missing": len(records) - photos_ok,
-        "after_ok": after_ok,
+        "slides": st["slides"],
+        "summary_slides": st["summary_slides"],
+        "photos_ok": st["photos_ok"],
+        "photos_missing": len(records) - st["photos_ok"],
+        "after_ok": st["after_ok"],
         "photos_from_file": images.from_file,
         "photos_from_web": images.from_web,
         "feeder": feeder,

@@ -241,11 +241,6 @@ def job_download(job_id):
         abort(404)
     result = state.get("result") or {}
     feeder = result.get("feeder") or "المغذي"
-    if result.get("is_zip"):
-        # التقارير الكبيرة تُبنى على أجزاء وتُسلَّم في ملف مضغوط
-        return send_file(state["output_path"], as_attachment=True,
-                         mimetype="application/zip",
-                         download_name=f"تقارير_{feeder}.zip")
     return send_file(state["output_path"], as_attachment=True,
                      download_name=f"تقرير_{feeder}.pptx")
 

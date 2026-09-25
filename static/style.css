@@ -638,3 +638,144 @@ input[type="number"] { -moz-appearance: textfield; }
 }
 .rule-three { grid-template-columns: repeat(3, 1fr); }
 @media (max-width: 720px) { .rule-map, .rule-three { grid-template-columns: 1fr; } }
+
+/* ------------------------------------------------ شاشة فرز الملاحظات */
+
+.pick-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0 8px;
+  padding: 14px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  position: sticky;                 /* العدّاد يلاحق المستخدم وهو ينزل */
+  top: 12px;
+  z-index: 5;
+}
+.pick-live { display: flex; align-items: baseline; gap: 10px; }
+.pick-live + .pick-live { margin-inline-start: 26px; }
+.pick-live .kpi-num { font-size: 30px; }
+.pick-live.muted .kpi-num { color: var(--dim); }
+.pick-live .kpi-lbl { font-size: 13px; }
+
+.pick { margin-top: 26px; }
+.pick-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.pick-head h2 { margin: 0; font-size: 16px; font-weight: 500; color: #C3CCD9; }
+.pick-head h2 em { font-style: normal; color: var(--dim); font-weight: 300; font-size: 13px; }
+.pick-actions { display: flex; align-items: center; gap: 8px; }
+.pick-actions input[type="search"] { width: 190px; min-height: 36px; font-size: 14px; }
+
+.pick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 2px 14px;
+}
+.pick-scroll { max-height: 340px; overflow-y: auto; padding-inline-end: 6px; }
+
+.pick-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  padding: 0 8px;
+  font-size: 14px;
+  color: var(--muted);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.pick-item:hover { background: #16222F; }
+.pick-item input[type="checkbox"] {
+  flex: none;
+  width: 17px; height: 17px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.pick-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pick-n {
+  flex: none;
+  font-size: 12px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+/* البند الذي لا يبقي صفًا واحدًا مع بقية الاختيارات: يبقى ظاهرًا ليُفهم */
+.pick-item.empty .pick-name, .pick-item.empty .pick-n { opacity: 0.38; }
+
+.sw-box {
+  flex: none;
+  width: 15px; height: 15px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+@media (max-width: 720px) {
+  .pick-bar { position: static; }
+  .pick-live + .pick-live { margin-inline-start: 0; }
+  .pick-grid { grid-template-columns: 1fr; }
+  .pick-actions input[type="search"] { width: 100%; }
+}
+/* اسم المغذي معرّف لاتيني/رقمي («629|M12 الجحفة»)؛ بلا dir=ltr يقلبه
+   محرّك الاتجاه فيظهر «M12|629» وهو خطأ يُربك القارئ */
+.pick-name[dir="ltr"] { text-align: right; }
+
+/* ------------------------------------- ميزان ملفات التنفيذ في شاشة المطابقة */
+
+.ledger {
+  width: 100%;
+  margin: 10px 0 6px;
+  border-collapse: collapse;
+  font-size: 14px;
+  color: var(--muted);
+}
+.ledger th, .ledger td {
+  padding: 9px 12px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.ledger th {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--dim);
+  border-bottom-color: var(--border-2);
+  white-space: nowrap;
+}
+.ledger td.ln {
+  text-align: start;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #C3CCD9;
+}
+.ledger td.ok { color: var(--ok); }
+/* الخانات التي تعني «لم يدخل الحساب» تُبرز، فالصفر فيها هو الطمأنينة */
+.ledger td.warn { color: #F0B429; }
+.ledger tr.sum td { border-top: 1px solid var(--border-2); border-bottom: none; }
+.ledger tr.sum td:first-child { color: var(--dim); }
+.ledger td.ln em {
+  display: block;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--dim);
+}
+/* ورقة أخرى فيها بيانات لم تُقرأ: تحذير يجب ألا يمرّ مرور الكرام */
+.ledger tr.note td {
+  text-align: start;
+  font-size: 12px;
+  color: #F0B429;
+  background: rgba(240, 180, 41, 0.07);
+}

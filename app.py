@@ -27,6 +27,7 @@ import afterfill
 import approval
 import builder
 import matcher
+import sorter
 import zones
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -646,6 +647,12 @@ def match_start():
     try:
         with heavy_lock():
             an = matcher.analyze(main_path, sec_paths)
+    except matcher.NoIdColumn as exc:
+        # صمت الأداة عن ملف لا عمود رقم فيه كان يُنقص النتيجة دون أن يظهر
+        shutil.rmtree(d, ignore_errors=True)
+        return fail(
+            f"ملف التنفيذ «{exc}» لا يحتوي على عمود رقم ملاحظة يمكن التعرّف "
+            "عليه، فلن يُحتسب منه شيء. سمِّ العمود «رقم الملاحظة» ثم أعد رفعه.")
     except Exception as exc:  # noqa: BLE001
         shutil.rmtree(d, ignore_errors=True)
         return fail(f"تعذّرت قراءة الملفات: {exc}")
@@ -678,6 +685,16 @@ def match_rules(job_id):
     an = _load_analysis(d)
     total = an["total"]
     mode = "column" if an.get("sec_has_status") else "done"
+    # الأعداد تتغيّر بتغيّر اختيار الحالة، فنحسب الأوضاع الثلاثة كلها ونترك
+    # الصفحة تبدّلها لحظيًا: كان المستخدم يرى عددًا لا يطابق ما سيخرج
+    mode_counts = {}
+    for m in ("column", "done", "wip"):
+        st = matcher.resolve_states(an, m)
+        dn, wp = st.count(matcher.ST_DONE), st.count(matcher.ST_WIP)
+        mode_counts[m] = {
+            "done": dn, "wip": wp, "remaining": total - dn - wp,
+            "percent": round(100.0 * dn / total, 1) if total else 0.0,
+        }
     states = matcher.resolve_states(an, mode)
     done = states.count(matcher.ST_DONE)
     wip = states.count(matcher.ST_WIP)
@@ -687,12 +704,18 @@ def match_rules(job_id):
         total=total, done=done, wip=wip, remaining=total - done - wip,
         percent=round(100.0 * done / total, 1) if total else 0.0,
         columns=columns, sec_mode=mode, states=matcher.EXEC_STATES,
+        mode_counts=mode_counts,
         state_color={matcher.ST_DONE: "green", matcher.ST_WIP: "yellow",
                      matcher.ST_NONE: "none"},
         n_found=an.get("n_found", 0),
+        n_found_rows=an.get("n_found_rows", 0),
+        ledger=an.get("ledger") or [],
+        sec_rows=sum(f["total"] for f in (an.get("ledger") or [])),
         distinct={str(k): v for k, v in an["distinct"].items()},
         colors=matcher.COLORS, max_rules=matcher.MAX_RULES,
         n_missing=len(an["missing"]), n_dups=len(an["dups"]),
+        n_dup_sec=len(an.get("dup_sec_rows") or []),
+        n_main_blank=len(an.get("main_blank") or []),
         has_status=an.get("status_col") is not None,
         sec_has_contractor=an.get("sec_has_contractor", False),
         n_sec_contractor=len(an.get("sec_contractor") or {}),
@@ -902,6 +925,147 @@ def approve_download(job_id):
     name = (state.get("result") or {}).get("feeder") or state.get("stem") or "الملاحظات"
     return send_file(state["output_path"], as_attachment=True,
                      download_name=f"اعتماد_{name}.xlsx".replace(" — ", "-"))
+
+
+# --------------------------------------------------------------------------
+# فرز الملاحظات: تصفية بالمغذي واللون والنوع، وترتيب ثابت
+# --------------------------------------------------------------------------
+
+def _sort_state(job_id):
+    d = job_dir(job_id)
+    state = read_state(d)
+    if state.get("kind") != "sort":
+        abort(404)
+    return d, state
+
+
+@app.route("/sort", methods=["GET"])
+def sort_form():
+    cleanup_old_jobs()
+    return render_template("sort_new.html")
+
+
+@app.route("/sort/start", methods=["POST"])
+def sort_start():
+    f = request.files.get("excel_file")
+    if not f or not f.filename:
+        return render_template("sort_new.html", error="الرجاء اختيار الملف أولًا."), 400
+    if not f.filename.lower().endswith((".xlsx", ".xlsm")):
+        return render_template("sort_new.html",
+                               error="الملف يجب أن يكون بصيغة ‎.xlsx‎."), 400
+
+    job_id, d = new_job_dir()
+    path = os.path.join(d, "input.xlsx")
+    f.save(path)
+    try:
+        with heavy_lock():
+            an = sorter.analyze(path)
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(d, ignore_errors=True)
+        return render_template("sort_new.html",
+                               error=f"تعذّرت قراءة الملف: {exc}"), 400
+
+    if not an["total"]:
+        shutil.rmtree(d, ignore_errors=True)
+        return render_template("sort_new.html",
+                               error="لم يُعثر على أي صف بيانات في الملف."), 400
+
+    with open(os.path.join(d, "analysis.pkl"), "wb") as fh:
+        pickle.dump(an, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    write_state(d, {
+        "job_id": job_id,
+        "kind": "sort",
+        "stem": os.path.splitext(os.path.basename(f.filename))[0][:60] or "الملاحظات",
+        "main_path": path,
+        "created_at": time.time(),
+    })
+    return redirect(url_for("sort_rules", job_id=job_id))
+
+
+@app.route("/job/<job_id>/sort")
+def sort_rules(job_id):
+    _d, state = _sort_state(job_id)
+    an = _load_analysis(job_dir(job_id))
+    return render_template("sort_rules.html", job_id=job_id, state=state, an=an,
+                           color_order=sorter.COLOR_ORDER)
+
+
+@app.route("/job/<job_id>/sort/build", methods=["POST"])
+def sort_build(job_id):
+    d, state = _sort_state(job_id)
+    an = _load_analysis(d)
+
+    feeders = request.form.getlist("feeder")
+    colors = [c for c in request.form.getlist("color")
+              if c in dict(sorter.COLOR_ORDER)]
+    types = request.form.getlist("type")
+
+    def again(msg, code=400):
+        return render_template("sort_rules.html", job_id=job_id, state=state, an=an,
+                               color_order=sorter.COLOR_ORDER, error=msg), code
+
+    if an["has_feeder"] and not feeders:
+        return again("اختر مغذيًا واحدًا على الأقل.")
+    if not colors:
+        return again("اختر لونًا واحدًا على الأقل.")
+    if an["has_type"] and not an["types_too_many"] and not types:
+        return again("اختر نوع ملاحظة واحدًا على الأقل.")
+
+    order = sorter.plan(an, feeders, colors, types)
+    if not order:
+        return again("لا يوجد صف واحد يطابق اختيارك — وسّع الاختيار.")
+
+    src = state.get("main_path") or ""
+    if not os.path.exists(src):
+        return again("انتهت صلاحية الجلسة — أعد رفع الملف.", 410)
+
+    out_path = os.path.join(d, "output.xlsx")
+    try:
+        with heavy_lock():
+            res = sorter.write_sorted(src, out_path, an["sheet_path"],
+                                      an["header_row"], order)
+    except Exception as exc:  # noqa: BLE001
+        return again(f"تعذّر بناء الملف: {exc}", 500)
+
+    kept = set(order)
+    breakdown = {}
+    feeders_out = []
+    for r in an["records"]:
+        if r["row"] in kept:
+            breakdown[r["color"]] = breakdown.get(r["color"], 0) + 1
+            if r["feeder"] not in feeders_out:
+                feeders_out.append(r["feeder"])
+    res.update({
+        "total_in": an["total"],
+        "removed": an["total"] - len(order),
+        "breakdown": [(sorter.COLOR_LABEL[k], breakdown[k])
+                      for k, _ in sorter.COLOR_ORDER if k in breakdown],
+        "feeders": sorted(feeders_out, key=sorter.natural_key),
+        "n_types": len(types) if types else 0,
+        "all_types": bool(an["has_type"]) and len(types) == len(an["types"]),
+    })
+    state["result"] = res
+    state["output_path"] = out_path
+    write_state(d, state)
+    return redirect(url_for("sort_result", job_id=job_id))
+
+
+@app.route("/job/<job_id>/sort/result")
+def sort_result(job_id):
+    _d, state = _sort_state(job_id)
+    if not state.get("result"):
+        return redirect(url_for("sort_rules", job_id=job_id))
+    return render_template("sort_result.html", job_id=job_id, state=state,
+                           r=state["result"])
+
+
+@app.route("/job/<job_id>/sort/download")
+def sort_download(job_id):
+    _d, state = _sort_state(job_id)
+    if not state.get("output_path") or not os.path.exists(state["output_path"]):
+        abort(404)
+    return send_file(state["output_path"], as_attachment=True,
+                     download_name=sorter.suggested_name(state.get("stem") or "الملاحظات"))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap wrap-wide">
+
+  <div class="page-head">
+    <h1>ما الذي يبقى في الملف؟</h1>
+    <p>
+      قُرئ <b>{{ an.total }}</b> صفًا من ورقة «{{ an.sheet }}».
+      كل ما تُلغي تأشيره يُحذف من الملف الناتج، والباقي يُرتَّب:
+      المغذي باسمه، ثم اللون، ثم التي لها إشعار D1 قبل غيرها.
+    </p>
+  </div>
+
+  {% if error %}<div class="errors">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ url_for('sort_build', job_id=job_id) }}" id="sortForm">
+
+    <div class="pick-bar">
+      <div class="pick-live">
+        <span class="kpi-num" id="liveTotal">0</span>
+        <span class="kpi-lbl">صف سيبقى في الملف</span>
+      </div>
+      <div class="pick-live muted">
+        <span class="kpi-num" id="liveDrop">0</span>
+        <span class="kpi-lbl">صف سيُحذف</span>
+      </div>
+      {% if an.has_d1 %}
+      <div class="pick-live muted">
+        <span class="kpi-num">{{ an.n_d1 }}</span>
+        <span class="kpi-lbl">لها إشعار D1 في الملف كله</span>
+      </div>
+      {% endif %}
+    </div>
+
+    {% if an.has_feeder %}
+    <section class="pick" data-group="feeder">
+      <div class="pick-head">
+        <h2>المغذيات <em>{{ an.feeders|length }}</em></h2>
+        <span class="pick-actions">
+          <button type="button" class="btn-small" data-all="1">الكل</button>
+          <button type="button" class="btn-small" data-all="0">لا شيء</button>
+        </span>
+      </div>
+      <div class="pick-grid">
+        {% for name, n in an.feeders %}
+        <label class="pick-item">
+          <input type="checkbox" name="feeder" value="{{ name }}" data-idx="{{ loop.index0 }}" checked>
+          <span class="pick-name" dir="ltr">{{ name }}</span>
+          <span class="pick-n" data-count>{{ n }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <section class="pick" data-group="color">
+      <div class="pick-head">
+        <h2>الألوان <em>بالترتيب الثابت</em></h2>
+        <span class="pick-actions">
+          <button type="button" class="btn-small" data-all="1">الكل</button>
+          <button type="button" class="btn-small" data-all="0">لا شيء</button>
+        </span>
+      </div>
+      <div class="pick-grid">
+        {% for c in an.colors %}
+        <label class="pick-item">
+          <input type="checkbox" name="color" value="{{ c.key }}" data-idx="{{ c.rank }}"
+                 {% if c.key != 'none' and c.key != 'other' %}checked{% endif %}>
+          <span class="sw-box" style="background:#{{ c.hex }}"></span>
+          <span class="pick-name">{{ c.label }}</span>
+          <span class="pick-n" data-count>{{ c.count }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <span class="hint">
+        اللون يُقرأ من تعبئة الصف في ملفك — هو الحالة الوحيدة التي لا يحملها أي عمود.
+        و«بلا لون» و«ألوان أخرى» غير مؤشَّرين، فالصفوف التي لم تلمسها تُحذف.
+      </span>
+    </section>
+
+    {% if an.has_type and not an.types_too_many %}
+    <section class="pick" data-group="type">
+      <div class="pick-head">
+        <h2>أنواع الملاحظات <em>{{ an.types|length }}</em></h2>
+        <span class="pick-actions">
+          <input type="search" id="typeSearch" placeholder="ابحث في الأنواع…" autocomplete="off">
+          <button type="button" class="btn-small" data-all="1">الكل</button>
+          <button type="button" class="btn-small" data-all="0">لا شيء</button>
+        </span>
+      </div>
+      <div class="pick-grid pick-scroll">
+        {% for name, n in an.types %}
+        <label class="pick-item">
+          <input type="checkbox" name="type" value="{{ name }}" data-idx="{{ loop.index0 }}" checked>
+          <span class="pick-name">{{ name }}</span>
+          <span class="pick-n" data-count>{{ n }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </section>
+    {% elif an.types_too_many %}
+    <span class="hint">عمود «الملاحظة» فيه أنواع أكثر من أن تُعرض، فلن يُصفّى به.</span>
+    {% endif %}
+
+    <button class="btn" type="submit" id="goBtn">افرز الملف</button>
+    <span class="hint">
+      لا تتغيّر خلية واحدة: تُحذف صفوف وتتحرّك صفوف، والقيم والألوان وعروض الأعمدة
+      والتجميد والتصفية وروابط الصور تنتقل كما هي.
+    </span>
+  </form>
+
+</div>
+
+<script>
+(function () {
+  var CUBE = {{ an.cube|tojson }};
+  var form = document.getElementById("sortForm");
+  var liveTotal = document.getElementById("liveTotal");
+  var liveDrop = document.getElementById("liveDrop");
+  var TOTAL = {{ an.total }};
+  var HAS_FEEDER = {{ 'true' if an.has_feeder else 'false' }};
+  var HAS_TYPE = {{ 'true' if (an.has_type and not an.types_too_many) else 'false' }};
+
+  // نفكّ المكعّب مرة واحدة إلى مصفوفة [مغذي، لون، نوع، عدد]
+  var CELLS = [];
+  Object.keys(CUBE).forEach(function (k) {
+    var p = k.split(",");
+    CELLS.push([+p[0], +p[1], +p[2], CUBE[k]]);
+  });
+
+  function boxes(group) {
+    var sec = form.querySelector('[data-group="' + group + '"]');
+    return sec ? Array.prototype.slice.call(sec.querySelectorAll('input[type="checkbox"]')) : [];
+  }
+
+  function selected(group) {
+    var s = {};
+    boxes(group).forEach(function (b) { if (b.checked) s[+b.dataset.idx] = 1; });
+    return s;
+  }
+
+  function recount() {
+    var f = selected("feeder"), c = selected("color"), t = selected("type");
+    var total = 0;
+    var perF = {}, perC = {}, perT = {};
+    for (var i = 0; i < CELLS.length; i++) {
+      var cell = CELLS[i], fi = cell[0], ci = cell[1], ti = cell[2], n = cell[3];
+      var okF = !HAS_FEEDER || f[fi], okC = c[ci], okT = !HAS_TYPE || t[ti];
+      if (okF && okC && okT) total += n;
+      // عدد كل بند لو أُشّر وحده مع بقية الاختيارات — يشرح لماذا يخرج صفرًا
+      if (okC && okT) perF[fi] = (perF[fi] || 0) + n;
+      if (okF && okT) perC[ci] = (perC[ci] || 0) + n;
+      if (okF && okC) perT[ti] = (perT[ti] || 0) + n;
+    }
+    liveTotal.textContent = total;
+    liveDrop.textContent = TOTAL - total;
+    document.getElementById("goBtn").disabled = total === 0;
+
+    [["feeder", perF], ["color", perC], ["type", perT]].forEach(function (pair) {
+      boxes(pair[0]).forEach(function (b) {
+        var n = pair[1][+b.dataset.idx] || 0;
+        var lbl = b.parentNode.querySelector("[data-count]");
+        if (lbl) lbl.textContent = n;
+        b.parentNode.classList.toggle("empty", n === 0);
+      });
+    });
+  }
+
+  form.addEventListener("change", function (e) {
+    if (e.target.type === "checkbox") recount();
+  });
+
+  form.querySelectorAll("[data-all]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var on = btn.dataset.all === "1";
+      var sec = btn.closest("[data-group]");
+      sec.querySelectorAll('input[type="checkbox"]').forEach(function (b) {
+        // البحث يخفي بنودًا؛ «الكل» لا يمسّ ما هو مخفيّ حتى لا يفاجئ المستخدم
+        if (b.parentNode.style.display !== "none") b.checked = on;
+      });
+      recount();
+    });
+  });
+
+  var search = document.getElementById("typeSearch");
+  if (search) {
+    search.addEventListener("input", function () {
+      var q = search.value.trim();
+      form.querySelectorAll('[data-group="type"] .pick-item').forEach(function (it) {
+        var name = it.querySelector(".pick-name").textContent;
+        it.style.display = (!q || name.indexOf(q) >= 0) ? "" : "none";
+      });
+    });
+  }
+
+  recount();
+})();
+</script>
+{% endblock %}

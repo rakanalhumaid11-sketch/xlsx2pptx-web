@@ -203,27 +203,80 @@ def _guess_id_col(headers: List[str], rows: List[List[Any]]) -> Optional[int]:
     return best if best_score >= 0.6 else None
 
 
-def read_pairs(path: str) -> Tuple[List[Tuple[str, str, Optional[str]]], bool]:
-    """((رقم، مقاول، حالة)…، هل في الملف عمود حالة) من ملف تنفيذ ثانوي."""
-    _sheet, _hdr, headers, rows, _nums = read_table(path)
+class NoIdColumn(ValueError):
+    """ملف تنفيذ لم نتعرّف على عمود رقم الملاحظة فيه.
+
+    كان الكود قديمًا يُرجع قائمة فارغة ويمضي بصمت، فيُرفع خمسة ملفات
+    ويُحتسب أربعة والأرقام تبدو معقولة — أسوأ أنواع الخطأ."""
+
+
+def read_exec_file(path: str) -> Dict[str, Any]:
+    """كل صفوف ملف تنفيذ ثانوي، بما فيها الصفوف التي لا رقم لها.
+
+    لا نُسقط شيئًا هنا: الإسقاط الصامت هو سبب نقص عدد التنبيهات. كل صف
+    يخرج من هذه الدالة إما برقم أو معلَّمًا بأنه بلا رقم، والميزان في
+    analyze هو الذي يوزّعها على خاناتها."""
+    sheet, hdr_row, headers, rows, row_nums = read_table(path)
     col = find_col(headers, ID_ALIASES)
     if col is None:
         col = _guess_id_col(headers, rows)
     if col is None:
-        return [], False
+        raise NoIdColumn(os.path.basename(path))
     ccol = find_col(headers, CONTRACTOR_ALIASES)
     scol = find_col(headers, SEC_STATUS_ALIASES)
     if scol == col or scol == ccol:
         scol = None
-    out = []
-    for r in rows:
-        nid = norm_id(r[col]) if col < len(r) else ""
+
+    items: List[Dict[str, Any]] = []
+    blank: List[int] = []
+    for r, rn in zip(rows, row_nums):
+        raw = _clean(r[col]) if col < len(r) else ""
+        nid = norm_id(raw)
         if not nid:
+            blank.append(rn)
             continue
-        name = _clean(r[ccol]) if ccol is not None and ccol < len(r) else ""
-        state = map_status(r[scol]) if scol is not None and scol < len(r) else None
-        out.append((nid, name, state))
-    return out, scol is not None
+        items.append({
+            "nid": nid,
+            "raw": raw,
+            "contractor": _clean(r[ccol]) if ccol is not None and ccol < len(r) else "",
+            "state": map_status(r[scol]) if scol is not None and scol < len(r) else None,
+            "row": rn,
+        })
+    # نقرأ ورقة واحدة من كل ملف تنفيذ (أكثرها صفوفًا وفيها عمود رقم). فإن
+    # كان في الملف ورقة أخرى فيها بيانات وجب أن يعرف المستخدم، وإلا ضاع
+    # عملها دون أثر — وهذا من «ما يفوتها» الذي لا يظهر في أي عدّاد
+    others: List[str] = []
+    try:
+        wb = load_workbook(path, read_only=True, data_only=True)
+        try:
+            for nm in wb.sheetnames:
+                if nm == sheet:
+                    continue
+                ws = wb[nm]
+                n = 0
+                for i, row in enumerate(ws.iter_rows(values_only=True)):
+                    if i > 40:
+                        break
+                    if any(c is not None and str(c).strip() for c in row):
+                        n += 1
+                if n > 1:
+                    others.append(nm)
+        finally:
+            wb.close()
+    except Exception:  # noqa: BLE001
+        others = []
+
+    return {
+        "name": os.path.basename(path),
+        "sheet": sheet,
+        "header_row": hdr_row,
+        "items": items,
+        "blank": blank,
+        "n_rows": len(items) + len(blank),
+        "has_status": scol is not None,
+        "has_contractor": ccol is not None,
+        "other_sheets": others,
+    }
 
 
 # ------------------------------------------------------------------ التحليل
@@ -238,31 +291,79 @@ def analyze(main_path: str, sec_paths: List[str]) -> Dict[str, Any]:
     if id_col is None:
         raise ValueError("لم يُعثر على عمود «رقم الملاحظة» في الملف الرئيسي.")
 
+    # فهرس أرقام الملف الرئيسي يُبنى أولًا، فبدونه لا يستطيع الميزان أن
+    # يقول عن صف في ملف التنفيذ: هل طوبِق أم لا مقابل له
+    main_ids = set()
+    main_blank: List[int] = []
+    for r, rn in zip(rows, row_nums):
+        nid = norm_id(r[id_col]) if id_col < len(r) else ""
+        if nid:
+            main_ids.add(nid)
+        else:
+            main_blank.append(rn)
+
     # رقم -> (اسم الملف، المقاول، الحالة المقروءة من الملف الثانوي)
     found: Dict[str, Tuple[str, str, Optional[str]]] = {}
     sec_names: List[str] = []
     sec_has_contractor = False
     sec_has_status = False
     n_sec_states = {ST_DONE: 0, ST_WIP: 0, ST_NONE: 0}
+
+    # الميزان: كل صف في كل ملف تنفيذ يسقط في خانة واحدة لا غير، ومجموع
+    # الخانات يجب أن يساوي عدد الصفوف تمامًا. هذا ما يمنع الضياع الصامت.
+    ledger: List[Dict[str, Any]] = []
+    unmatched_rows: List[Tuple[str, str, int]] = []   # (الرقم، الملف، الصف)
+    dup_sec_rows: List[Tuple[str, str, int]] = []
+    raw_of: Dict[str, str] = {}
+    collisions: List[Tuple[str, str]] = []
+    rank = {None: 0, ST_NONE: 1, ST_WIP: 2, ST_DONE: 3}
+
     for p in sec_paths:
-        name = os.path.basename(p)
+        info = read_exec_file(p)
+        name = info["name"]
         sec_names.append(name)
-        pairs, has_status = read_pairs(p)
-        sec_has_status = sec_has_status or has_status
-        for nid, contractor, state in pairs:
+        sec_has_status = sec_has_status or info["has_status"]
+        n_match = n_dup = n_miss = 0
+        for it in info["items"]:
+            nid, contractor, state = it["nid"], it["contractor"], it["state"]
             if contractor:
                 sec_has_contractor = True
             if state:
                 n_sec_states[state] += 1
             old = found.get(nid)
-            if old is None:
-                found[nid] = (name, contractor, state)
-            else:
-                # عند التكرار: الحالة الأقوى والاسم غير الفارغ هما ما يبقى
-                rank = {None: 0, ST_NONE: 1, ST_WIP: 2, ST_DONE: 3}
-                found[nid] = (old[0],
-                              old[1] or contractor,
+            if old is not None:
+                # تكرار: نحتفظ بالحالة الأقوى وبأول اسم مقاول غير فارغ،
+                # ونحسبه في خانته بدل أن يختفي في القاموس
+                n_dup += 1
+                dup_sec_rows.append((it["raw"], name, it["row"]))
+                found[nid] = (old[0], old[1] or contractor,
                               state if rank[state] > rank[old[2]] else old[2])
+                continue
+            found[nid] = (name, contractor, state)
+            prev_raw = raw_of.get(nid)
+            if prev_raw is None:
+                raw_of[nid] = it["raw"]
+            elif re.sub(r"\s+", "", prev_raw).upper() != re.sub(r"\s+", "", it["raw"]).upper():
+                collisions.append((prev_raw, it["raw"]))
+            if nid in main_ids:
+                n_match += 1
+            else:
+                n_miss += 1
+                unmatched_rows.append((it["raw"], name, it["row"]))
+
+        n_blank = len(info["blank"])
+        total = info["n_rows"]
+        if n_blank + n_dup + n_match + n_miss != total:
+            raise ValueError(
+                "ميزان الملف «%s» لم يتّزن (%d صفًا مقابل %d) — أبلغ عن هذا "
+                "بدل الاعتماد على نتيجة ناقصة."
+                % (name, n_blank + n_dup + n_match + n_miss, total))
+        ledger.append({
+            "name": name, "sheet": info["sheet"], "total": total,
+            "matched": n_match, "dup": n_dup, "missing": n_miss,
+            "blank": n_blank, "blank_rows": info["blank"][:200],
+            "other_sheets": info.get("other_sheets") or [],
+        })
 
     # عمود حالة تنفيذ سابق: يُحترم كي تتراكم نتائج الجولات بدل أن تُستبدل
     prev_exec_col = find_col(headers, EXEC_ALIASES)
@@ -302,7 +403,10 @@ def analyze(main_path: str, sec_paths: List[str]) -> Dict[str, Any]:
         else:
             states.append(ST_NONE)
 
-    missing = [(nid, v[0]) for nid, v in found.items() if nid not in hit_ids]
+    # «بلا مقابل» تُسرد بصفوفها لا بأرقامها المختلفة: الصياغة القديمة كانت
+    # تُبنى من مفاتيح القاموس، فملف فيه مئة صف يكرّر ثمانية أرقام يعطي
+    # اثنين وتسعين تنبيهًا — وهو النقص الذي لاحظه المستخدم
+    missing = unmatched_rows
 
     distinct: Dict[int, List[str]] = {}
     for c in range(len(headers)):
@@ -337,10 +441,18 @@ def analyze(main_path: str, sec_paths: List[str]) -> Dict[str, Any]:
         "sec_has_contractor": sec_has_contractor,
         "sec_has_status": sec_has_status,
         "n_sec_states": n_sec_states,
+        # عدد الأرقام المختلفة التي طوبِقت، وعدد الصفوف التي تلوّنت فعلًا.
+        # الرقمان يختلفان متى تكرّر رقم في الملف الرئيسي، والعرض يجب أن
+        # يكون بالصفوف لأنها ما يراه المستخدم في الملف والداتا شيت.
         "n_found": len(hit_ids),
+        "n_found_rows": len(found_rows),
         "carried": carried,
         "missing": missing,
         "dups": dups,
+        "dup_sec_rows": dup_sec_rows,
+        "collisions": collisions,
+        "main_blank": main_blank,
+        "ledger": ledger,
         "distinct": distinct,
         "sec_names": sec_names,
         "total": len(rows),
@@ -578,36 +690,74 @@ def build_datasheet(s: Dict[str, int], an: Dict[str, Any], states: List[str],
     return sb
 
 
-def build_alerts(s: Dict[str, int], missing: List[Tuple[str, str]],
-                 dups: List[Tuple[str, int]]) -> SheetBuilder:
+def build_alerts(s: Dict[str, int], an: Dict[str, Any]) -> SheetBuilder:
+    """ورقة التنبيهات: الميزان أولًا، ثم كل صف لم يدخل الحساب باسمه.
+
+    الميزان هو الضمانة: عدد صفوف كل ملف تنفيذ موزَّع على أربع خانات لا
+    تتداخل، ومجموعها يساوي العدد. فإن نقص شيء ظهر النقص في السطر نفسه
+    بدل أن يبتلعه القاموس."""
     sb = SheetBuilder()
-    for c, w in ((0, 2.5), (1, 26), (2, 38), (3, 2.5)):
+    for c, w in ((0, 2.5), (1, 30), (2, 30), (3, 14), (4, 2.5)):
         sb.width(c, w)
     sb.height(1, 8)
     sb.set(1, 1, None, s["spacer"])
-    band(sb, 2, 1, 2, "تنبيهات المطابقة", s["title"])
+    band(sb, 2, 1, 3, "تنبيهات المطابقة", s["title"])
     sb.height(2, 36)
     sb.height(3, 12)
     sb.set(3, 1, None, s["spacer"])
 
     row = 4
-    for title, head, data in (
-            ("أرقام في ملفات التنفيذ ولا وجود لها في الملف الرئيسي",
-             ("رقم الملاحظة", "الملف الثانوي"), missing[:2000]),
-            ("أرقام مكررة داخل الملف الرئيسي",
-             ("رقم الملاحظة", "رقم الصف"), dups[:2000])):
-        if not data:
-            continue
-        band(sb, row, 1, 2, title, s["sect"])
+    ledger = an.get("ledger") or []
+    if ledger:
+        band(sb, row, 1, 3, "ميزان ملفات التنفيذ — كل صف في خانة واحدة", s["sect"])
         sb.height(row, 22)
         row += 1
-        sb.set(row, 1, head[0], s["th"])
-        sb.set(row, 2, head[1], s["th"])
-        for k, (a, b) in enumerate(data):
+        for j, h in enumerate(("ملف التنفيذ", "الخانة", "العدد")):
+            sb.set(row, 1 + j, h, s["th"])
+        k = 0
+        for f in ledger:
+            for label, n in (("صفوف الملف", f["total"]),
+                             ("طوبِقت في الملف الرئيسي", f["matched"]),
+                             ("رقمها مكرر (حُسبت مرة)", f["dup"]),
+                             ("لا رقم ملاحظة فيها", f["blank"]),
+                             ("لا مقابل لها في الرئيسي", f["missing"])):
+                row += 1
+                alt = k % 2 == 1
+                k += 1
+                st = s["name_b"] if alt else s["name"]
+                sb.set(row, 1, f["name"] if label == "صفوف الملف" else None, st)
+                sb.set(row, 2, label, st)
+                sb.set(row, 3, n, s["td_b"] if alt else s["td"])
+        row += 2
+
+    for title, head, data in (
+            ("صفوف في ملفات التنفيذ لا مقابل لرقمها في الملف الرئيسي",
+             ("رقم الملاحظة", "ملف التنفيذ", "الصف فيه"),
+             (an.get("missing") or [])[:2000]),
+            ("صفوف في ملفات التنفيذ رقمها مكرر — حُسبت مرة واحدة",
+             ("رقم الملاحظة", "ملف التنفيذ", "الصف فيه"),
+             (an.get("dup_sec_rows") or [])[:2000]),
+            ("أرقام مكررة داخل الملف الرئيسي",
+             ("رقم الملاحظة", "رقم الصف", ""), (an.get("dups") or [])[:2000]),
+            ("أرقام مختلفة الكتابة عُدّت رقمًا واحدًا عند المطابقة",
+             ("الأول", "الثاني", ""), (an.get("collisions") or [])[:500]),
+            ("صفوف في الملف الرئيسي بلا رقم ملاحظة — لا تُطابَق أبدًا",
+             ("رقم الصف", "", ""),
+             [(n,) for n in (an.get("main_blank") or [])[:2000]])):
+        if not data:
+            continue
+        band(sb, row, 1, 3, title, s["sect"])
+        sb.height(row, 22)
+        row += 1
+        for j, h in enumerate(head):
+            if h:
+                sb.set(row, 1 + j, h, s["th"])
+        for k, item in enumerate(data):
             row += 1
             alt = k % 2 == 1
-            sb.set(row, 1, a, s["name_b"] if alt else s["name"])
-            sb.set(row, 2, b, s["name_b"] if alt else s["name"])
+            st = s["name_b"] if alt else s["name"]
+            for j in range(3):
+                sb.set(row, 1 + j, item[j] if j < len(item) else None, st)
         row += 2
     return sb
 
@@ -714,8 +864,8 @@ def build_output(an: Dict[str, Any], rules: List[Dict[str, Any]],
         out = [("الداتا شيت",
                 build_datasheet(s, an, states, contractors, subtitle,
                                 exec_range, class_range, contractor_range))]
-        if an["missing"] or an["dups"]:
-            out.append(("تنبيهات", build_alerts(s, an["missing"], an["dups"])))
+        # الورقة تُكتب دائمًا: الميزان نفسه هو الفائدة، حتى حين لا تنبيه
+        out.append(("تنبيهات", build_alerts(s, an)))
         return out
 
     total_cols = n_cols + len(new_columns)
@@ -744,7 +894,14 @@ def build_output(an: Dict[str, Any], rules: List[Dict[str, Any]],
         "carried": an.get("carried", 0),
         "missing": len(an["missing"]),
         "dups": len(an["dups"]),
-        "alerts": len(an["missing"]) + len(an["dups"]),
+        "dup_sec": len(an.get("dup_sec_rows") or []),
+        "main_blank": len(an.get("main_blank") or []),
+        "collisions": len(an.get("collisions") or []),
+        "alerts": (len(an["missing"]) + len(an["dups"])
+                   + len(an.get("dup_sec_rows") or [])
+                   + len(an.get("main_blank") or [])),
+        "ledger": an.get("ledger") or [],
+        "sec_rows": sum(f["total"] for f in (an.get("ledger") or [])),
         "colored": colored,
         "new_cols": [t for t, _ in new_columns],
         "contractors_moved": moved,

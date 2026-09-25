@@ -11,21 +11,74 @@
 
   <div class="kpi-row kpi-5">
     <div class="kpi"><span class="kpi-num">{{ total }}</span><span class="kpi-lbl">إجمالي الملاحظات</span></div>
-    <div class="kpi ok"><span class="kpi-num">{{ done }}</span><span class="kpi-lbl">منفّذة</span></div>
-    <div class="kpi"><span class="kpi-num">{{ wip }}</span><span class="kpi-lbl">جاري العمل</span></div>
-    <div class="kpi"><span class="kpi-num">{{ remaining }}</span><span class="kpi-lbl">متبقية</span></div>
-    <div class="kpi"><span class="kpi-num">{{ percent }}%</span><span class="kpi-lbl">نسبة الإنجاز</span></div>
+    <div class="kpi ok"><span class="kpi-num" id="kDone">{{ done }}</span><span class="kpi-lbl">منفّذة</span></div>
+    <div class="kpi"><span class="kpi-num" id="kWip">{{ wip }}</span><span class="kpi-lbl">جاري العمل</span></div>
+    <div class="kpi"><span class="kpi-num" id="kRem">{{ remaining }}</span><span class="kpi-lbl">متبقية</span></div>
+    <div class="kpi"><span class="kpi-num" id="kPct">{{ percent }}%</span><span class="kpi-lbl">نسبة الإنجاز</span></div>
   </div>
+  <p class="sec-note" id="kNote">
+    هذه هي الأعداد التي ستخرج في الملف والداتا شيت بالاختيار الحالي — تتغيّر فور تغييرك لحالة الملاحظات الواردة.
+  </p>
 
   {% if an.carried %}
   <p class="summary-line"><b>{{ an.carried }}</b> منها كانت معلّمة «منفذ» في الملف الرئيسي من جولة سابقة، أبقيناها كما هي.</p>
   {% endif %}
 
-  {% if n_missing or n_dups %}
-  <p class="summary-line">
-    {% if n_missing %}<b>{{ n_missing }}</b> رقم في ملفات التنفيذ ليس له مقابل في الملف الرئيسي.{% endif %}
-    {% if n_dups %} <b>{{ n_dups }}</b> رقم مكرر داخل الملف الرئيسي.{% endif %}
-    تجدها مفصّلة في ورقة «تنبيهات» داخل الملف الناتج.
+  {% if ledger %}
+  <h2 class="sec-title">ميزان ملفات التنفيذ</h2>
+  <p class="sec-note">
+    كل صف في كل ملف تنفيذ يسقط في خانة واحدة لا غير، ومجموع الخانات يساوي عدد
+    الصفوف. فما لم يدخل الحساب يظهر هنا باسمه بدل أن يختفي.
+  </p>
+  <table class="ledger">
+    <thead>
+      <tr>
+        <th>ملف التنفيذ</th>
+        <th>صفوفه</th>
+        <th>طوبِقت</th>
+        <th>رقمها مكرر</th>
+        <th>بلا رقم</th>
+        <th>بلا مقابل</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in ledger %}
+      <tr>
+        <td class="ln" title="{{ f.name }}">
+          {{ f.name }}
+          <em>ورقة «{{ f.sheet }}»</em>
+        </td>
+        <td><b>{{ f.total }}</b></td>
+        <td class="ok">{{ f.matched }}</td>
+        <td {% if f.dup %}class="warn"{% endif %}>{{ f.dup }}</td>
+        <td {% if f.blank %}class="warn"{% endif %}>{{ f.blank }}</td>
+        <td {% if f.missing %}class="warn"{% endif %}>{{ f.missing }}</td>
+      </tr>
+      {% if f.other_sheets %}
+      <tr class="note">
+        <td colspan="6">
+          في «{{ f.name }}» أوراق أخرى فيها بيانات لم تُقرأ:
+          {{ f.other_sheets|join(' · ') }} — انقل ما فيها إلى ورقة واحدة إن كان عملًا منفّذًا.
+        </td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+      {% if ledger|length > 1 %}
+      <tr class="sum">
+        <td>المجموع</td>
+        <td><b>{{ sec_rows }}</b></td>
+        <td class="ok">{{ ledger|sum(attribute='matched') }}</td>
+        <td>{{ ledger|sum(attribute='dup') }}</td>
+        <td>{{ ledger|sum(attribute='blank') }}</td>
+        <td>{{ ledger|sum(attribute='missing') }}</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+  <p class="sec-note">
+    {% if n_dups %}<b>{{ n_dups }}</b> رقمًا مكررًا داخل الملف الرئيسي.{% endif %}
+    {% if n_main_blank %} <b>{{ n_main_blank }}</b> صفًا في الملف الرئيسي بلا رقم ملاحظة، فلا يمكن مطابقتها أبدًا.{% endif %}
+    وكل صف في الخانات أعلاه مسرود باسمه ورقم سطره في ورقة «تنبيهات» داخل الملف الناتج.
   </p>
   {% endif %}
 
@@ -33,8 +86,10 @@
 
     <h2 class="sec-title">حالة الملاحظات الواردة في ملفات التنفيذ</h2>
     <p class="sec-note">
-      {{ n_found }} ملاحظة من الملف الرئيسي وردت في ملفات التنفيذ.
-      {% if an.sec_has_status %}وُجد في ملفات التنفيذ عمود حالة، فالأصل أن نقرأه.{% endif %}
+      {{ n_found_rows }} صفًا في الملف الرئيسي ورد رقمه في ملفات التنفيذ{% if n_found_rows != n_found %}
+      (بـ {{ n_found }} رقمًا مختلفًا — الفرق تكرار داخل الملف الرئيسي){% endif %}.
+      والأعداد أعلاه بالصفوف لا بالأرقام، لأن الصفوف هي ما يتلوّن ويُحسب في الداتا شيت.
+      {% if an.sec_has_status %}ووُجد في ملفات التنفيذ عمود حالة، فالأصل أن نقرأه.{% endif %}
     </p>
 
     <div class="rule rule-one">
@@ -184,6 +239,24 @@ document.querySelectorAll(".color-pick").forEach(function (box) {
   sel.addEventListener("change", paint);
   paint();
 });
+
+// عدّاد المنفّذ يتبع اختيار الحالة: عرضُ عددٍ لا يطابق ما سيخرج في الملف
+// هو ما جعل «المنجز» يبدو غير دقيق قبل الاستخراج
+(function () {
+  var COUNTS = {{ mode_counts|tojson }};
+  var sel = document.querySelector('select[name="sec_status_mode"]');
+  if (!sel) return;
+  function paint() {
+    var c = COUNTS[sel.value];
+    if (!c) return;
+    document.getElementById("kDone").textContent = c.done;
+    document.getElementById("kWip").textContent = c.wip;
+    document.getElementById("kRem").textContent = c.remaining;
+    document.getElementById("kPct").textContent = c.percent + "%";
+  }
+  sel.addEventListener("change", paint);
+  paint();
+})();
 
 // نبدأ بقاعدتين فقط ونكشف الباقي عند الطلب حتى لا تمتلئ الصفحة بصفوف فارغة
 (function () {

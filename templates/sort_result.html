@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+
+  <div class="page-head">
+    <h1>الملف المفروز جاهز</h1>
+    <p>مرتَّب بالمغذي ثم اللون ثم إشعار D1، وبمظهر الملف الأصلي نفسه.</p>
+  </div>
+
+  <div class="kpi-row">
+    <div class="kpi ok"><span class="kpi-num">{{ r.rows }}</span><span class="kpi-lbl">صف في الملف</span></div>
+    <div class="kpi"><span class="kpi-num">{{ r.total_in }}</span><span class="kpi-lbl">كان في الأصل</span></div>
+    <div class="kpi"><span class="kpi-num">{{ r.removed }}</span><span class="kpi-lbl">حُذف</span></div>
+    <div class="kpi"><span class="kpi-num">{{ r.feeders|length }}</span><span class="kpi-lbl">مغذٍّ</span></div>
+  </div>
+
+  <ul class="stats">
+    {% for label, n in r.breakdown %}
+    <li><span>{{ label }}</span><b>{{ n }}</b></li>
+    {% endfor %}
+    <li><span>روابط الصور المنقولة</span><b>{{ r.links_kept }}</b></li>
+  </ul>
+
+  {% if r.feeders %}
+  <p class="summary-line">المغذيات في الملف: {{ r.feeders|join(' · ') }}</p>
+  {% endif %}
+
+  <a class="btn" href="{{ url_for('sort_download', job_id=job_id) }}">تحميل الملف المفروز</a>
+  <span class="hint">
+    هذا الملف صالح لأن يكون الملف الرئيسي في أداة «متابعة المنفذ».
+    ورابط صورة كل ملاحظة أُعيد ربطه بصفّه الجديد، فلا تهاجر صورة إلى ملاحظة غيرها.
+  </span>
+
+  <p style="margin-top: 26px">
+    <a class="back-link" href="{{ url_for('sort_rules', job_id=job_id) }}">رجوع لتعديل الاختيار</a>
+  </p>
+
+</div>
+{% endblock %}

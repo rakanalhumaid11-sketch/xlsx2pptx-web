@@ -20,10 +20,34 @@
     {% if r.new_cols %}<li><span>أعمدة أُضيفت في آخر الملف</span><b>{{ r.new_cols|join(' · ') }}</b></li>{% endif %}
     {% if r.contractors_moved %}<li><span>أسماء مقاولين نُقلت من ملفات التنفيذ</span><b>{{ r.contractors_moved }}</b></li>{% endif %}
     {% if r.carried %}<li><span>محسوبة من جولة سابقة</span><b>{{ r.carried }}</b></li>{% endif %}
-    {% if r.missing %}<li><span>أرقام بلا مقابل في الملف الرئيسي</span><b>{{ r.missing }}</b></li>{% endif %}
+    {% if r.missing %}<li><span>صفوف تنفيذ بلا مقابل في الرئيسي</span><b>{{ r.missing }}</b></li>{% endif %}
+    {% if r.dup_sec %}<li><span>صفوف تنفيذ رقمها مكرر</span><b>{{ r.dup_sec }}</b></li>{% endif %}
     {% if r.dups %}<li><span>أرقام مكررة في الملف الرئيسي</span><b>{{ r.dups }}</b></li>{% endif %}
-    <li><span>أوراق أُضيفت</span><b>الداتا شيت{% if r.alerts %} · تنبيهات{% endif %}</b></li>
+    {% if r.main_blank %}<li><span>صفوف في الرئيسي بلا رقم ملاحظة</span><b>{{ r.main_blank }}</b></li>{% endif %}
+    <li><span>أوراق أُضيفت</span><b>الداتا شيت · تنبيهات</b></li>
   </ul>
+
+  {% if r.ledger %}
+  <h2 class="sec-title">ميزان ملفات التنفيذ</h2>
+  <p class="sec-note">مجموع الخانات يساوي عدد صفوف كل ملف — فلا صف خرج من الحساب دون أن يُذكر.</p>
+  <table class="ledger">
+    <thead>
+      <tr><th>ملف التنفيذ</th><th>صفوفه</th><th>طوبِقت</th><th>رقمها مكرر</th><th>بلا رقم</th><th>بلا مقابل</th></tr>
+    </thead>
+    <tbody>
+      {% for f in r.ledger %}
+      <tr>
+        <td class="ln" title="{{ f.name }}">{{ f.name }}</td>
+        <td><b>{{ f.total }}</b></td>
+        <td class="ok">{{ f.matched }}</td>
+        <td {% if f.dup %}class="warn"{% endif %}>{{ f.dup }}</td>
+        <td {% if f.blank %}class="warn"{% endif %}>{{ f.blank }}</td>
+        <td {% if f.missing %}class="warn"{% endif %}>{{ f.missing }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
 
   <a class="btn" href="{{ url_for('match_download', job_id=job_id) }}">تحميل ملف المتابعة</a>
   <span class="hint">

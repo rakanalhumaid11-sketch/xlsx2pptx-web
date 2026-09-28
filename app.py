@@ -1198,19 +1198,30 @@ def photos_review(job_id):
     notes = []
     for n in an["notes"]:
         ch = choices.get(str(n["row"])) or {}
+        tags = ch.get("tags") if "tags" in ch else (n.get("tags") or [])
+        text = ch.get("text") if "text" in ch else (n.get("text") or "")
+        hide = ch.get("hide") if isinstance(ch.get("hide"), bool) else n.get("hide")
         notes.append({
             "row": n["row"], "id": n["id"], "type": n["type"],
             "inspect": n["inspect"], "maint": n["maint"],
             "contractor": n["contractor"],
+            "status": n.get("status", ""), "returned": bool(n.get("returned")),
             "before": [{"u": u, "k": photoreview.key_of(u)} for u in n["before"]],
             "after": [{"u": u, "k": photoreview.key_of(u)} for u in n["after"]],
             "pb": ch.get("before", n["before"][0] if n["before"] else ""),
             "pa": ch.get("after", n["after"][0] if n["after"] else ""),
             "score": ch.get("score", 0),
+            "tags": tags or [], "text": text or "",
+            "hide": photoreview.resolve_hide({"tags": tags, "hide": hide}),
+            "hide_set": isinstance(hide, bool),
         })
     return render_template("photos_review.html", job_id=job_id, state=state,
                            notes=notes, key=photoreview.key_of,
-                           comparable=photoreview.COMPARABLE)
+                           comparable=photoreview.COMPARABLE,
+                           presets=photoreview.PRESETS,
+                           hide_presets=sorted(photoreview.HIDE_BY_DEFAULT),
+                           n_returned=sum(1 for n in notes if n["returned"]),
+                           n_noted=sum(1 for n in notes if n["tags"] or n["text"].strip()))
 
 
 @app.route("/job/<job_id>/photos/thumb/<name>")
@@ -1234,6 +1245,7 @@ def photos_save(job_id):
     data = request.get_json(silent=True) or {}
     picks = data.get("picks") or {}
     choices = state.get("choices") or {}
+    presets = set(photoreview.PRESETS)
     n = 0
     for row, v in picks.items():
         if not isinstance(v, dict):
@@ -1242,6 +1254,13 @@ def photos_save(job_id):
         for k in ("before", "after"):
             if isinstance(v.get(k), str):
                 c[k] = v[k]
+        # ملاحظة المراجعة: الجاهزة تُقبل من القائمة وحدها، والنص الحرّ بطول معقول
+        if isinstance(v.get("tags"), list):
+            c["tags"] = [t for t in v["tags"] if isinstance(t, str) and t in presets]
+        if isinstance(v.get("text"), str):
+            c["text"] = v["text"].strip()[:300]
+        if isinstance(v.get("hide"), bool):
+            c["hide"] = v["hide"]
         c.setdefault("score", 0)
         choices[str(row)] = c
         n += 1

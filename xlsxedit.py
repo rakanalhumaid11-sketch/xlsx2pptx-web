@@ -462,12 +462,17 @@ def add_list_validation(sheet_xml: str, sqref: str, options: List[str]) -> str:
 def patch_sheet(sheet_xml: str, styles: Styles, *, header_row: int, n_cols: int,
                 cell_values: Dict[Tuple[int, int], Any],
                 new_columns: List[Tuple[str, Dict[int, Any]]],
-                row_fills: Optional[Dict[int, str]] = None) -> str:
-    """يكتب قيمًا ويضيف أعمدة في آخر الورقة، ويلوّن صفوفًا بعينها.
+                row_fills: Optional[Dict[int, str]] = None,
+                cell_fills: Optional[Dict[Tuple[int, int], str]] = None) -> str:
+    """يكتب قيمًا ويضيف أعمدة في آخر الورقة، ويلوّن صفوفًا أو خلايا بعينها.
+
+    cell_fills يلوّن خلية واحدة لا الصف كله: الصف قد يحمل لونًا وضعه
+    المستخدم بيده وهو عنده بيانات (أداة الفرز تقرأه)، فلا يجوز أن يُطمس.
 
     التلوين هنا ثابت لأنه يخصّ صفوفًا محدّدة بأعيانها (ما طابق ملفات التنفيذ)
     لا شرطًا في البيانات؛ أما التلوين حسب الحالة فتنسيق شرطي حيّ."""
     row_fills = row_fills or {}
+    cell_fills = cell_fills or {}
     n_new = len(new_columns)
     total_cols = n_cols + n_new
 
@@ -537,6 +542,19 @@ def patch_sheet(sheet_xml: str, styles: Styles, *, header_row: int, n_cols: int,
                                 + cells[c][cut:])
                 else:
                     cells[c] = '<c r="%s%d" s="%d"/>' % (col_letter(c), rn, new_s)
+            touched = True
+
+        for (fr, fc), fhex in cell_fills.items():
+            if fr != rn or rn <= header_row:
+                continue
+            base = _cell_style(cells[fc]) if fc in cells else 0
+            new_s = styles.tinted(base, fhex)
+            if fc in cells:
+                cut = cells[fc].index(">") + 1
+                cells[fc] = (_set_attr(cells[fc][:cut], "s", str(new_s))
+                             + cells[fc][cut:])
+            else:
+                cells[fc] = '<c r="%s%d" s="%d"/>' % (col_letter(fc), rn, new_s)
             touched = True
 
         if touched:
@@ -619,6 +637,7 @@ def write_patched(src_path: str, dst_path: str, *, sheet_name: str,
                   cell_values: Dict[Tuple[int, int], Any],
                   new_columns: List[Tuple[str, Dict[int, Any]]],
                   row_fills: Optional[Dict[int, str]] = None,
+                  cell_fills: Optional[Dict[Tuple[int, int], str]] = None,
                   cf: Optional[Tuple[str, List[Tuple[str, str]]]] = None,
                   validation: Optional[Tuple[str, List[str]]] = None,
                   sheets_factory=None) -> None:
@@ -639,7 +658,8 @@ def write_patched(src_path: str, dst_path: str, *, sheet_name: str,
 
         sheet_xml = patch_sheet(
             sheet_xml, styles, header_row=header_row, n_cols=n_cols,
-            cell_values=cell_values, new_columns=new_columns, row_fills=row_fills)
+            cell_values=cell_values, new_columns=new_columns, row_fills=row_fills,
+            cell_fills=cell_fills)
         if validation:
             sheet_xml = add_list_validation(sheet_xml, validation[0], validation[1])
         if cf:

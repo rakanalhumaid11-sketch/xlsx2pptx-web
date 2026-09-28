@@ -858,3 +858,78 @@ input[type="number"] { -moz-appearance: textfield; }
   .rv-main, .rv-empty { height: 240px; }
   .rv-actions { margin-inline-start: 0; width: 100%; }
 }
+
+/* ------------------------------ ملاحظات المراجعة والملاحظات المسترجعة */
+
+.rv-stat.red b { color: #FF5A5A; }
+.rv-stat.red span { color: #FF8A8A; }
+.rv-seg button.seg-red { color: #FF7A7A; }
+.rv-seg button.seg-red.on { color: #fff; background: #D92D2D; }
+
+/* المسترجعة: أحمر لا يُخطئه التمرير السريع — شريط جانبي عريض وخلفية وشارة */
+.rv.returned {
+  background: rgba(217, 45, 45, 0.10);
+  border-inline-start: 5px solid #E03131;
+  padding-inline-start: 12px;
+  border-radius: 6px;
+}
+.rv-ret {
+  flex: none;
+  font-size: 12px; font-weight: 500;
+  padding: 3px 10px; border-radius: 999px;
+  color: #fff; background: #D92D2D;
+}
+
+.rv-review {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  margin-top: 10px;
+}
+.rv-review-lbl { font-size: 12px; color: var(--dim); }
+.rv-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rv-chip {
+  font-family: inherit; font-size: 12px; font-weight: 400;
+  min-height: 30px; padding: 0 11px; border-radius: 999px; cursor: pointer;
+  color: var(--muted); background: transparent; border: 1px solid var(--border-2);
+}
+.rv-chip:hover { border-color: #FF8A8A; color: #FFB3B3; }
+.rv-chip.on { color: #fff; background: #C92A2A; border-color: #C92A2A; }
+.rv-text {
+  flex: 1 1 180px; min-width: 160px;
+  min-height: 32px !important; height: 32px; font-size: 13px !important;
+}
+.rv-hide button { font-size: 12px; min-height: 32px; padding: 0 10px; }
+.rv-hide[hidden], .rv-stamp[hidden] { display: none !important; }
+.rv.noted:not(.returned) { background: rgba(201, 42, 42, 0.05); }
+
+/* الختم فوق صورة «بعد»: شريط أحمر أسفلها إن بقيت، ويغطّيها إن حُذفت —
+   فيرى المستخدم في الصفحة ما سيراه في البوربوينت */
+.rv-stamp {
+  position: absolute; left: 0; right: 0; top: 0; height: 250px;
+  display: flex; align-items: flex-end; justify-content: center;
+  pointer-events: none; border-radius: 10px; overflow: hidden;
+}
+.rv-stamp-txt {
+  width: 100%; padding: 8px 12px; text-align: center;
+  font-size: 13px; font-weight: 500; line-height: 1.6;
+  color: #fff; background: rgba(201, 42, 42, 0.92);
+}
+.rv.hidephoto .rv-side[data-side="after"] .rv-main { opacity: 0.12; }
+.rv.hidephoto .rv-stamp { align-items: center; border: 2px solid #E03131; }
+.rv.hidephoto .rv-stamp-txt {
+  width: auto; max-width: 86%; border-radius: 8px;
+  font-size: 15px; padding: 14px 18px;
+  color: #FF6B6B; background: rgba(20, 8, 8, 0.85); border: 1px solid #E03131;
+}
+
+@media (max-width: 720px) {
+  .rv-stamp { height: 240px; }
+}
+.rv-side.missing .rv-main { visibility: hidden; }
+.rv-side.missing::after {
+  content: "الصورة غير متاحة عند المستضيف";
+  position: absolute; top: 0; left: 0; right: 0; height: 250px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--dim);
+  border: 1px dashed var(--border-2); border-radius: 10px;
+}
+.rv-alt.gone { opacity: 0.25; border-style: dashed; border-color: var(--border-2); }

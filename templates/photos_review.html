@@ -5,11 +5,16 @@
   <div class="rv-bar">
     <div class="rv-stat"><b id="rvTotal">{{ notes|length }}</b><span>ملاحظة</span></div>
     <div class="rv-stat"><b id="rvChanged">0</b><span>غيّرتها</span></div>
-    <div class="rv-stat muted"><b>{{ state.with_after }}</b><span>لها صور «بعد»</span></div>
+    <div class="rv-stat"><b id="rvNoted">{{ n_noted }}</b><span>عليها ملاحظة</span></div>
+    {% if n_returned %}
+    <div class="rv-stat red"><b>{{ n_returned }}</b><span>مسترجعة</span></div>
+    {% endif %}
     <div class="rv-actions">
       <span class="rv-seg" id="filter">
         <button type="button" data-f="after" class="on">لها صور «بعد»</button>
         <button type="button" data-f="weak">زاويتان مختلفتان</button>
+        {% if n_returned %}<button type="button" data-f="ret" class="seg-red">المسترجعة</button>{% endif %}
+        <button type="button" data-f="noted">عليها ملاحظة</button>
         <button type="button" data-f="all">الكل</button>
       </span>
       <span class="rv-saved" id="saved"></span>
@@ -19,13 +24,20 @@
 
   <div id="list">
     {% for n in notes %}
-    <section class="rv" data-row="{{ n.row }}"
+    {% set noted = n.tags or n.text %}
+    <section class="rv {{ 'returned' if n.returned else '' }} {{ 'noted' if noted else '' }}"
+             data-row="{{ n.row }}"
              data-hasafter="{{ 1 if n.after else 0 }}"
-             data-weak="{{ 1 if (n.after and n.score < comparable) else 0 }}">
+             data-weak="{{ 1 if (n.after and n.score < comparable) else 0 }}"
+             data-ret="{{ 1 if n.returned else 0 }}"
+             data-hideset="{{ 1 if n.hide_set else 0 }}">
       <div class="rv-head">
         <span class="rv-id" dir="ltr">{{ n.id }}</span>
         <span class="rv-type">{{ n.type }}</span>
         {% if n.inspect %}<span class="rv-note">{{ n.inspect }}</span>{% endif %}
+        {% if n.returned %}
+          <span class="rv-ret">مسترجعة — أُعيدت المعالجة للمقاول</span>
+        {% endif %}
         {% if n.after %}
           <span class="rv-flag {{ 'ok' if n.score >= comparable else 'weak' }}">
             {{ 'يصلح للمقارنة' if n.score >= comparable else 'زاويتان مختلفتان' }}
@@ -42,6 +54,11 @@
           {% if items %}
           <img class="rv-main" loading="lazy" alt=""
                src="{{ url_for('photos_thumb', job_id=job_id, name=key(pick) + '.jpg') }}">
+          {% if side == 'after' %}
+          <div class="rv-stamp" {% if not noted %}hidden{% endif %}>
+            <span class="rv-stamp-txt">{{ (n.tags + ([n.text] if n.text else []))|join('، ') }}</span>
+          </div>
+          {% endif %}
           {% if items|length > 1 %}
           <div class="rv-alts">
             {% for it in items %}
@@ -57,6 +74,24 @@
         </div>
         {% endfor %}
       </div>
+
+      <div class="rv-review">
+        <span class="rv-review-lbl">ملاحظة على المعالجة:</span>
+        <span class="rv-chips">
+          {% for p in presets %}
+          <button type="button" class="rv-chip {{ 'on' if p in n.tags else '' }}"
+                  data-tag="{{ p }}">{{ p }}</button>
+          {% endfor %}
+        </span>
+        <input type="text" class="rv-text" maxlength="300" value="{{ n.text }}"
+               placeholder="نص آخر…" aria-label="ملاحظة حرّة">
+        {% if n.after %}
+        <span class="rv-seg rv-hide" {% if not noted %}hidden{% endif %}>
+          <button type="button" data-hide="1" class="{{ 'on' if n.hide else '' }}">احذف الصورة — النص مكانها</button>
+          <button type="button" data-hide="0" class="{{ '' if n.hide else 'on' }}">أبقِ الصورة مع الملاحظة</button>
+        </span>
+        {% endif %}
+      </div>
     </section>
     {% endfor %}
   </div>
@@ -68,55 +103,142 @@
 <script>
 (function () {
   var jobId = "{{ job_id }}";
+  var HIDE_PRESETS = {{ hide_presets|tojson }};
   var pending = {}, timer = null, changed = 0;
   var saved = document.getElementById("saved");
 
   function flush() {
     var picks = pending; pending = {};
-    if (!Object.keys(picks).length) return;
+    clearTimeout(timer);
+    if (!Object.keys(picks).length) return Promise.resolve();
     saved.textContent = "يحفظ…";
-    fetch("/job/" + jobId + "/photos/save", {
+    return fetch("/job/" + jobId + "/photos/save", {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({picks: picks})
+      body: JSON.stringify({picks: picks}), keepalive: true
     }).then(function (r) { return r.json(); })
       .then(function () { saved.textContent = "محفوظ"; })
       .catch(function () { saved.textContent = "تعذّر الحفظ — أعد المحاولة"; });
   }
 
-  // نجمع التبديلات ونرسلها دفعة كل ثانية: التمرير السريع قد يبدّل عشرات
-  // الصور في ثوانٍ، وطلب لكل ضغطة يُغرق الخادم المجاني
-  function queue(row, side, url) {
-    pending[row] = pending[row] || {};
-    pending[row][side] = url;
+  // نجمع التبديلات ونرسلها دفعة: التمرير السريع قد يبدّل عشرات الصور في
+  // ثوانٍ، وطلب لكل ضغطة يُغرق الخادم المجاني
+  function queue(row, patch) {
+    pending[row] = Object.assign(pending[row] || {}, patch);
     clearTimeout(timer);
     timer = setTimeout(flush, 900);
   }
 
-  document.getElementById("list").addEventListener("click", function (ev) {
-    var alt = ev.target.closest(".rv-alt");
-    if (!alt) return;
-    var side = alt.closest(".rv-side");
-    var card = alt.closest(".rv");
-    if (alt.classList.contains("on")) return;
-    side.querySelectorAll(".rv-alt").forEach(function (x) { x.classList.remove("on"); });
-    alt.classList.add("on");
-    side.querySelector(".rv-main").src = alt.src;
-    if (!card.classList.contains("touched")) {
-      card.classList.add("touched");
-      changed += 1;
-      document.getElementById("rvChanged").textContent = changed;
+  function markTouched(card) {
+    if (card.classList.contains("touched")) return;
+    card.classList.add("touched");
+    changed += 1;
+    document.getElementById("rvChanged").textContent = changed;
+  }
+
+  function refreshNoted() {
+    document.getElementById("rvNoted").textContent =
+      document.querySelectorAll(".rv.noted").length;
+  }
+
+  // حالة الملاحظة في البطاقة → الختم فوق الصورة، ومفتاح مصير الصورة
+  function syncReview(card, sendHide) {
+    var tags = Array.prototype.map.call(card.querySelectorAll(".rv-chip.on"),
+                                        function (b) { return b.dataset.tag; });
+    var text = card.querySelector(".rv-text").value.trim();
+    var parts = tags.slice();
+    if (text) parts.push(text);
+    var noted = parts.length > 0;
+    card.classList.toggle("noted", noted);
+
+    var stamp = card.querySelector(".rv-stamp");
+    if (stamp) {
+      stamp.hidden = !noted;
+      stamp.querySelector(".rv-stamp-txt").textContent = parts.join("، ");
     }
-    queue(card.dataset.row, side.dataset.side, alt.dataset.u);
+    var seg = card.querySelector(".rv-hide");
+    var patch = {tags: tags, text: text};
+    if (seg) {
+      seg.hidden = !noted;
+      // ما دام المستخدم لم يختر بنفسه، يتبع المصير الافتراضي نوعَ الملاحظة:
+      // الطعن في الصورة نفسها يحذفها، والطعن في المعالجة يُبقيها إثباتًا
+      if (card.dataset.hideset !== "1") {
+        var hide = tags.some(function (t) { return HIDE_PRESETS.indexOf(t) >= 0; });
+        setHide(card, hide);
+        if (sendHide) patch.hide = hide;
+      }
+    }
+    refreshNoted();
+    return patch;
+  }
+
+  function setHide(card, hide) {
+    var seg = card.querySelector(".rv-hide");
+    if (!seg) return;
+    seg.querySelectorAll("button").forEach(function (b) {
+      b.classList.toggle("on", (b.dataset.hide === "1") === hide);
+    });
+    card.classList.toggle("hidephoto", hide && card.classList.contains("noted"));
+  }
+
+  var list = document.getElementById("list");
+
+  list.addEventListener("click", function (ev) {
+    var card = ev.target.closest(".rv");
+    if (!card) return;
+
+    var alt = ev.target.closest(".rv-alt");
+    if (alt) {
+      if (alt.classList.contains("on")) return;
+      var side = alt.closest(".rv-side");
+      side.querySelectorAll(".rv-alt").forEach(function (x) { x.classList.remove("on"); });
+      alt.classList.add("on");
+      side.querySelector(".rv-main").src = alt.src;
+      markTouched(card);
+      var p = {}; p[side.dataset.side] = alt.dataset.u;
+      queue(card.dataset.row, p);
+      return;
+    }
+
+    var chip = ev.target.closest(".rv-chip");
+    if (chip) {
+      chip.classList.toggle("on");
+      markTouched(card);
+      queue(card.dataset.row, syncReview(card, true));
+      return;
+    }
+
+    var hb = ev.target.closest(".rv-hide button");
+    if (hb) {
+      card.dataset.hideset = "1";
+      var hide = hb.dataset.hide === "1";
+      setHide(card, hide);
+      markTouched(card);
+      queue(card.dataset.row, {hide: hide});
+    }
   });
 
-  // الفرز الافتراضي «لها صور بعد»: الملاحظة بلا صورة «بعد» لا شيء فيها
-  // يُقارَن، وعرضها يضاعف التمرير ثلاث مرات بلا فائدة
+  list.addEventListener("input", function (ev) {
+    if (!ev.target.classList.contains("rv-text")) return;
+    var card = ev.target.closest(".rv");
+    markTouched(card);
+    queue(card.dataset.row, syncReview(card, true));
+  });
+
+  // الحالة الأولى لكل بطاقة (ملف رُوجع في جولة سابقة يأتي بملاحظاته)
+  document.querySelectorAll(".rv.noted").forEach(function (c) {
+    syncReview(c, false);
+    var on = c.querySelector('.rv-hide button.on');
+    if (on) setHide(c, on.dataset.hide === "1");
+  });
+
   function applyFilter(f) {
     var shown = 0;
     document.querySelectorAll(".rv").forEach(function (c) {
       var keep = f === "all" ? true
         : f === "after" ? c.dataset.hasafter === "1"
-        : c.dataset.weak === "1";
+        : f === "weak" ? c.dataset.weak === "1"
+        : f === "ret" ? c.dataset.ret === "1"
+        : c.classList.contains("noted");
       c.style.display = keep ? "" : "none";
       if (keep) shown += 1;
     });
@@ -133,27 +255,42 @@
   applyFilter("after");
 
   document.getElementById("goBuild").addEventListener("click", function () {
-    flush();
     var box = document.getElementById("buildBox");
     box.innerHTML = '<p class="hint">يبني الملف…</p>';
-    setTimeout(function () {
-      fetch("/job/" + jobId + "/photos/build", {method: "POST"})
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (!d.ok) { box.innerHTML = '<div class="errors">' + (d.error || "خطأ") + "</div>"; return; }
-          var r = d.result;
-          box.innerHTML =
-            '<ul class="stats">' +
-            "<li><span>ملاحظات</span><b>" + r.notes + "</b></li>" +
-            "<li><span>أعمدة صور أُعيد ترتيبها</span><b>" + r.reordered + "</b></li>" +
-            "<li><span>يصلح للمقارنة</span><b>" + r.comparable + "</b></li>" +
-            "<li><span>زاويتان مختلفتان</span><b>" + r.not_comparable + "</b></li>" +
-            "<li><span>بلا صورة «بعد»</span><b>" + r.no_after + "</b></li>" +
-            "</ul><a class='btn' href='" + d.url + "'>تحميل الملف</a>";
-          box.scrollIntoView({behavior: "smooth"});
-        });
-    }, 300);
+    box.scrollIntoView({behavior: "smooth"});
+    // البناء بعد اكتمال الحفظ لا بعد مهلة ثابتة: وإلا ضاعت آخر ضغطة
+    flush().then(function () {
+      return fetch("/job/" + jobId + "/photos/build", {method: "POST"});
+    }).then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.ok) { box.innerHTML = '<div class="errors">' + (d.error || "خطأ") + "</div>"; return; }
+        var r = d.result;
+        box.innerHTML =
+          '<ul class="stats">' +
+          "<li><span>ملاحظات</span><b>" + r.notes + "</b></li>" +
+          "<li><span>أعمدة صور أُعيد ترتيبها</span><b>" + r.reordered + "</b></li>" +
+          "<li><span>عليها ملاحظة مراجعة</span><b>" + r.review_notes + "</b></li>" +
+          "<li><span>صورة حُذفت من التقرير والنص مكانها</span><b>" + r.hidden + "</b></li>" +
+          (r.returned ? "<li><span>مسترجعة</span><b style='color:#FF6B6B'>" + r.returned + "</b></li>" : "") +
+          "<li><span>زاويتان مختلفتان</span><b>" + r.not_comparable + "</b></li>" +
+          "<li><span>بلا صورة «بعد»</span><b>" + r.no_after + "</b></li>" +
+          "</ul><a class='btn' href='" + d.url + "'>تحميل الملف</a>";
+      })
+      .catch(function () { box.innerHTML = '<div class="errors">تعذّر بناء الملف — أعد المحاولة.</div>'; });
   });
+
+  // صورة حذفها المستضيف (يرجع 404) كانت تظهر مربعًا أسود بلا تفسير —
+  // نكتب السبب مكانها. أحداث الخطأ لا تنتشر، فنلتقطها في طور الالتقاط
+  document.addEventListener("error", function (ev) {
+    var im = ev.target;
+    if (!im || im.tagName !== "IMG") return;
+    if (im.classList.contains("rv-main")) {
+      im.closest(".rv-side").classList.add("missing");
+    } else if (im.classList.contains("rv-alt")) {
+      im.classList.add("gone");
+      im.title = "الصورة غير متاحة عند المستضيف";
+    }
+  }, true);
 
   window.addEventListener("beforeunload", flush);
 })();

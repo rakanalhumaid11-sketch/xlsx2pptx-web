@@ -21,6 +21,11 @@ from xml.etree import ElementTree as ET
 
 from openpyxl import load_workbook
 from pptx import Presentation
+from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.oxml.ns import qn
+from pptx.util import Emu, Pt
 
 import engine
 
@@ -58,6 +63,9 @@ COLUMN_ALIASES: Dict[str, List[str]] = {
     "inspect_date": ["تاريخ الفحص", "التاريخ"],
     "contractor": ["المقاول", "اسم المقاول", "الشركة", "الشركه", "المنفذ",
                    "تمت المعالجة بواسطة", "تمت المعالجه بواسطة"],
+    # يكتبهما أداة «مراجعة الصور»: نص المراجعة، ومصير صورة «بعد» في التقرير
+    "review_note": ["ملاحظة المراجعة"],
+    "review_photo": ["صورة المعالجة في التقرير"],
 }
 
 
@@ -396,6 +404,108 @@ def fill_summary(slide, feeder: str, notice: str, totals: Optional[Dict[str, int
 _UNSET = object()
 
 
+# ------------------------------------------------------ ملاحظة المراجعة
+
+REVIEW_RED = RGBColor(0xC0, 0x00, 0x00)
+REVIEW_FONT = "GE SS Two Bold"          # خط عناوين القالب نفسه
+
+
+def review_state(rec: Dict[str, str]) -> Tuple[str, bool]:
+    """(نص المراجعة، هل تُحذف صورة «بعد» ويُكتب النص مكانها)."""
+    note = (rec.get("review_note") or "").strip()
+    how = (rec.get("review_photo") or "").strip()
+    # الحذف يحتاج تصريحًا صريحًا من أداة المراجعة؛ ملاحظة كُتبت يدويًا في
+    # الإكسل بلا هذا العمود تُبقي الصورة وتضع الختم فوقها — فلا تضيع صورة
+    hide = bool(note) and how.startswith("محذوفة")
+    return note, hide
+
+
+def _style_runs(paragraph, size_pt: int, color: RGBColor, bold: bool = True):
+    """خط ولون ولغة لكل مقطع، مع الخط المركّب (cs) الذي يرسم به PowerPoint
+    العربية — تعيين font.name وحده يضبط الخط اللاتيني فقط."""
+    pPr = paragraph._p.get_or_add_pPr()
+    pPr.set("rtl", "1")
+    paragraph.alignment = PP_ALIGN.CENTER
+    for r in paragraph.runs:
+        r.font.size = Pt(size_pt)
+        r.font.bold = bold
+        r.font.color.rgb = color
+        r.font.name = REVIEW_FONT
+        rPr = r._r.get_or_add_rPr()
+        rPr.set("lang", "ar-SA")
+        for tag in ("a:cs",):
+            el = rPr.find(qn(tag))
+            if el is None:
+                el = rPr.makeelement(qn(tag), {})
+                rPr.append(el)
+            el.set("typeface", REVIEW_FONT)
+
+
+def _fit(note: str, big: int, mid: int, small: int) -> int:
+    n = len(note)
+    return big if n <= 32 else mid if n <= 70 else small
+
+
+def _set_alpha(shape, alpha_pct: int):
+    """شفافية تعبئة الشكل — python-pptx لا يعرضها، فنكتبها في XML مباشرة."""
+    clr = shape.fill._xPr.find(qn("a:solidFill"))
+    if clr is None:
+        return
+    rgb = clr.find(qn("a:srgbClr"))
+    if rgb is not None:
+        a = rgb.makeelement(qn("a:alpha"), {"val": str(int(alpha_pct * 1000))})
+        rgb.append(a)
+
+
+def draw_review_panel(slide, left, top, width, height, note: str):
+    """النص مكان الصورة: إطار أحمر واضح بعنوان صغير ثم ملاحظة المراجعة."""
+    inset = int(min(width, height) * 0.04)
+    box = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,
+                                 left + inset, top + inset,
+                                 width - 2 * inset, height - 2 * inset)
+    box.adjustments[0] = 0.06
+    box.fill.solid()
+    box.fill.fore_color.rgb = RGBColor(0xFD, 0xEC, 0xEC)
+    box.line.color.rgb = REVIEW_RED
+    box.line.width = Pt(2.5)
+    box.shadow.inherit = False
+    tf = box.text_frame
+    tf.word_wrap = True
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    for side in ("margin_left", "margin_right", "margin_top", "margin_bottom"):
+        setattr(tf, side, Emu(int(width * 0.06)))
+    p1 = tf.paragraphs[0]
+    p1.text = "ملاحظة المراجعة"
+    _style_runs(p1, 14, RGBColor(0x8A, 0x1C, 0x1C), bold=False)
+    p2 = tf.add_paragraph()
+    p2.text = note
+    p2.space_before = Pt(8)
+    _style_runs(p2, _fit(note, 24, 20, 16), REVIEW_RED)
+    return box
+
+
+def draw_review_banner(slide, pic, note: str):
+    """الصورة باقية: شريط أحمر شبه شفاف أسفلها كختم — الصورة هي الإثبات."""
+    h = max(int(pic.height * 0.22), Emu(420000))
+    band = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+                                  pic.left, pic.top + pic.height - h, pic.width, h)
+    band.fill.solid()
+    band.fill.fore_color.rgb = REVIEW_RED
+    _set_alpha(band, 88)
+    band.line.fill.background()
+    band.shadow.inherit = False
+    tf = band.text_frame
+    tf.word_wrap = True
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    for side in ("margin_left", "margin_right"):
+        setattr(tf, side, Emu(int(pic.width * 0.04)))
+    tf.margin_top = tf.margin_bottom = Emu(40000)
+    p = tf.paragraphs[0]
+    p.text = note
+    _style_runs(p, _fit(note, 16, 14, 12), RGBColor(0xFF, 0xFF, 0xFF))
+    return band
+
+
 def fill_note(slide, rec: Dict[str, str], feeder: str, notice: str,
               images: Optional["ImageSource"] = None, img=_UNSET,
               img_after=_UNSET) -> Tuple[bool, bool]:
@@ -428,14 +538,22 @@ def fill_note(slide, rec: Dict[str, str], feeder: str, notice: str,
             return images.get(url)
         return engine.download_image(url) if url.startswith("http") else None
 
-    # خانة «بعد»: إطار بلا شكل صورة، فنُدرج الصورة داخله عند توفّرها في الملف
+    # خانة «بعد»: إطار بلا شكل صورة، فنُدرج الصورة داخله عند توفّرها في الملف.
+    # وإن كانت على الملاحظة مراجعة: إما النص مكان الصورة، وإما الصورة وختم فوقها
     after_ok = False
     frame = find(slide, "PH_FRAME_AFTER")
-    after = fetch(rec.get("photo_after", ""), img_after)
-    if frame is not None and after:
-        engine.insert_picture_in_box(slide, frame.left, frame.top,
-                                     frame.width, frame.height, after)
-        after_ok = True
+    note, hide = review_state(rec)
+    after = None if (note and hide) else fetch(rec.get("photo_after", ""), img_after)
+    if frame is not None:
+        if after:
+            pic = engine.insert_picture_in_box(slide, frame.left, frame.top,
+                                               frame.width, frame.height, after)
+            after_ok = True
+            if note:
+                draw_review_banner(slide, pic, note)
+        elif note:
+            draw_review_panel(slide, frame.left, frame.top, frame.width,
+                              frame.height, note)
 
     box = find(slide, "PH_PHOTO_BEFORE")
     if box is None:
@@ -485,7 +603,8 @@ def _build_one(out_path: str, part_records: List[Dict[str, str]], feeder: str,
     for start in range(0, total, CHUNK):
         chunk = part_records[start:start + CHUNK]
         blobs = images.get_many([r.get(k, "") for r in chunk
-                                 for k in ("photo1", "photo_after")])
+                                 for k in ("photo1", "photo_after")
+                                 if not (k == "photo_after" and review_state(r)[1])])
         for j, rec in enumerate(chunk):
             idx = _dup(prs, IDX_NOTE)
             note_indices.append(idx)

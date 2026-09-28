@@ -48,6 +48,53 @@ TYPE_ALIASES = ["الملاحظة", "الملاحظه", "وصف الملاحظة
 INSPECT_ALIASES = ["ملاحظات الفحص", "ملاحظات الفحص الإضافية"]
 MAINT_ALIASES = ["ملاحظات الصيانة", "ملاحظات الصيانه"]
 CONTRACTOR_ALIASES = ["تمت المعالجة بواسطة", "تمت المعالجه بواسطة", "المقاول"]
+STATUS_ALIASES = ["الحالة", "الحاله", "حالة الملاحظة", "حالة الملاحظه"]
+
+# ملاحظات المراجعة الجاهزة، بنصّ المستخدم حرفيًا. والقسمة بين المجموعتين هي
+# الافتراض الأوّلي لمصير صورة «بعد» في التقرير — والمستخدم يغيّره بضغطة:
+# ما يطعن في الصورة نفسها (موقع آخر، زاوية أخرى) تُحذف معه الصورة ويُكتب
+# النص مكانها؛ وما يطعن في المعالجة تبقى معه الصورة لأنها هي الإثبات.
+PRESETS = [
+    "التأكد من الموقع",
+    "الصورة غير مطابقة في الزاوية",
+    "توضيح ماذا تم في المعالجة",
+    "المعالجة غير واضحة",
+    "غير مطابقة للمواصفات",
+]
+HIDE_BY_DEFAULT = {"التأكد من الموقع", "الصورة غير مطابقة في الزاوية"}
+NOTE_SEP = "، "
+
+REVIEW_HEADER = "ملاحظة المراجعة"
+PHOTO_HEADER = "صورة المعالجة في التقرير"
+PHOTO_HIDDEN = "محذوفة — النص مكانها"
+PHOTO_KEPT = "تُعرض مع الملاحظة"
+
+# حالات النظام التي تعني أن المعالجة أُعيدت للمقاول
+RETURNED = {"RETURNED", "REJECTED", "مسترجع", "مسترجعة", "معاد", "معادة",
+            "مرتجع", "مرتجعة", "مرفوض", "مرفوضة"}
+
+
+def is_returned(status: str) -> bool:
+    t = (status or "").strip()
+    return t.upper() in RETURNED or _norm(t) in {_norm(x) for x in RETURNED}
+
+
+def split_note(note: str) -> Tuple[List[str], str]:
+    """(الملاحظات الجاهزة، النص الحرّ) من نص محفوظ في الإكسل.
+
+    يعيد بناء حالة الصفحة عند رفع ملف رُوجع من قبل، فلا يضيع عمل الجولة
+    السابقة ولا يُكتب فوقه."""
+    tags: List[str] = []
+    rest: List[str] = []
+    for part in [x.strip() for x in (note or "").split(NOTE_SEP.strip()) if x.strip()]:
+        (tags if part in PRESETS else rest).append(part)
+    return tags, NOTE_SEP.join(rest)
+
+
+def join_note(tags: List[str], text: str) -> str:
+    ordered = [p for p in PRESETS if p in (tags or [])]
+    parts = ordered + ([text.strip()] if (text or "").strip() else [])
+    return NOTE_SEP.join(parts)
 
 
 def _norm(s: Any) -> str:
@@ -115,6 +162,10 @@ def analyze(path: str) -> Dict[str, Any]:
     in_c = _find(headers, INSPECT_ALIASES)
     mt_c = _find(headers, MAINT_ALIASES)
     ct_c = _find(headers, CONTRACTOR_ALIASES)
+    st_c = _find(headers, STATUS_ALIASES)
+    # أعمدة مراجعة من جولة سابقة: تُقرأ ويُكتب فيها بدل فتح عمود مكرر
+    rv_c = _find(headers, [REVIEW_HEADER])
+    ph_c = _find(headers, [PHOTO_HEADER])
 
     notes: List[Dict[str, Any]] = []
     for i, row in enumerate(rows):
@@ -134,17 +185,29 @@ def analyze(path: str) -> Dict[str, Any]:
         b, a = urls(before), urls(after)
         if not b and not a:
             continue
+        status = g(st_c)
+        tags, text = split_note(g(rv_c))
         notes.append({
             "row": i + 1,                       # رقم الصف في إكسل
             "id": g(id_c), "type": g(ty_c),
             "inspect": g(in_c), "maint": g(mt_c), "contractor": g(ct_c),
+            "status": status, "returned": is_returned(status),
             "before": b, "after": a,
+            # قيم الأعمدة في مواضعها الأصلية (بفراغاتها): المخرج يبادل خليتين
+            # فقط، ولو أعاد رصّ القائمة المنظّفة لحذف تكرارًا أو أزاح فراغًا
+            "before_raw": [g(c) for c in before],
+            "after_raw": [g(c) for c in after],
+            "tags": tags, "text": text,
+            "hide": g(ph_c).startswith(PHOTO_HIDDEN[:6]) if ph_c is not None else None,
         })
     return {
         "sheet": sheet_name,
         "header_row": hdr_i + 1,
         "headers": headers,
         "n_cols": len(headers),
+        "review_col": rv_c,
+        "photo_col": ph_c,
+        "n_returned": sum(1 for n in notes if n["returned"]),
         "before_cols": before,
         "after_cols": after,
         "notes": notes,
@@ -305,12 +368,21 @@ def _rank_all(an: Dict[str, Any], thumb_dir: str, ok_map: Dict[str, bool],
 COMPARABLE = int(os.environ.get("REVIEW_COMPARABLE", "12"))
 
 
+def resolve_hide(ch: Dict[str, Any]) -> bool:
+    """مصير صورة «بعد»: اختيار المستخدم إن وُجد، وإلا الافتراض من نوع الملاحظة."""
+    if isinstance(ch.get("hide"), bool):
+        return ch["hide"]
+    return any(t in HIDE_BY_DEFAULT for t in (ch.get("tags") or []))
+
+
 def write_output(an: Dict[str, Any], choices: Dict[int, Dict[str, Any]],
                  src_path: str, out_path: str) -> Dict[str, Any]:
-    """نسخة من الملف أُعيد فيها ترتيب أعمدة الصور حسب اختيار المستخدم.
+    """نسخة من الملف: أعمدة الصور مرتّبة حسب الاختيار، وملاحظات المراجعة.
 
-    لا تُحذف صورة ولا تُضاف: تُبادَل مواضعها داخل أعمدتها فقط، فتصير
-    المختارة في «صورة قبل 1» و«صورة بعد 1»."""
+    الصور لا تُحذف ولا تُضاف: تُبادَل خليتان فقط داخل عمودهما، فتصير
+    المختارة في «صورة قبل 1» و«صورة بعد 1». و«احذف الصورة» لا يمسح الرابط
+    من الإكسل — الصورة المرفوضة دليلك عند إرجاع العمل — بل يُكتب في عمود
+    «صورة المعالجة في التقرير» أنها محذوفة، فيكتب مولّد التقرير النص مكانها."""
     cell_values: Dict[Tuple[int, int], Any] = {}
     moved = 0
     by_row = {n["row"]: n for n in an["notes"]}
@@ -319,27 +391,76 @@ def write_output(an: Dict[str, Any], choices: Dict[int, Dict[str, Any]],
         if not n:
             continue
         for kind, cols in (("before", an["before_cols"]), ("after", an["after_cols"])):
-            urls = list(n[kind])
-            pick = ch.get(kind) or ""
-            if not urls or not pick or pick not in urls:
+            raw = list(n.get(kind + "_raw") or [])
+            pick = (ch.get(kind) or "").strip()
+            if not raw or not pick or raw[0].strip() == pick:
                 continue
-            if urls[0] == pick:
+            j = next((k for k, v in enumerate(raw) if v.strip() == pick), None)
+            if j is None:
                 continue
-            j = urls.index(pick)
-            urls[0], urls[j] = urls[j], urls[0]
+            raw[0], raw[j] = raw[j], raw[0]
+            cell_values[(row, cols[0])] = raw[0] or None
+            cell_values[(row, cols[j])] = raw[j] or None
             moved += 1
-            for k, c in enumerate(cols):
-                cell_values[(row, c)] = urls[k] if k < len(urls) else None
+
+    # ملاحظات المراجعة: في أعمدة الجولة السابقة إن وُجدت، وإلا عمودان جديدان
+    n_cols = an["n_cols"]
+    new_columns: List[Tuple[str, Dict[int, Any]]] = []
+    rv_vals: Dict[int, Any] = {}
+    ph_vals: Dict[int, Any] = {}
+    n_notes = n_hidden = n_ret_noted = 0
+    for n in an["notes"]:
+        ch = choices.get(n["row"]) or {}
+        tags = ch.get("tags") if "tags" in ch else n.get("tags")
+        text = ch.get("text") if "text" in ch else n.get("text")
+        note = join_note(tags or [], text or "")
+        if note:
+            n_notes += 1
+            n_ret_noted += 1 if n.get("returned") else 0
+            hide = resolve_hide({"tags": tags, "hide": ch.get("hide", n.get("hide"))})
+            if not n.get("after"):
+                photo = "لا توجد صورة «بعد» — النص مكانها"
+            elif hide:
+                photo = PHOTO_HIDDEN
+                n_hidden += 1
+            else:
+                photo = PHOTO_KEPT
+            rv_vals[n["row"]] = note
+            ph_vals[n["row"]] = photo
+        elif an.get("review_col") is not None:
+            # أُزيلت ملاحظة كانت في جولة سابقة: تُمسح لا تُترك قديمة
+            rv_vals[n["row"]] = None
+            ph_vals[n["row"]] = None
+
+    def place(existing: Optional[int], header: str, vals: Dict[int, Any]) -> int:
+        if existing is not None:
+            for r, v in vals.items():
+                cell_values[(r, existing)] = v
+            return existing
+        idx = n_cols + len(new_columns)
+        new_columns.append((header, {r: v for r, v in vals.items() if v}))
+        return idx
+
+    cell_fills: Dict[Tuple[int, int], str] = {}
+    if rv_vals:
+        rc = place(an.get("review_col"), REVIEW_HEADER, rv_vals)
+        pc = place(an.get("photo_col"), PHOTO_HEADER, ph_vals)
+        # تُلوَّن خليتا الملاحظة وحدهما لا الصف: لون الصف عند المستخدم بيانات
+        for r, v in rv_vals.items():
+            if v:
+                cell_fills[(r, rc)] = "FFC7CE"
+                cell_fills[(r, pc)] = "FFC7CE"
 
     xlsxedit.write_patched(
         src_path, out_path,
         sheet_name=an["sheet"], header_row=an["header_row"],
-        n_cols=an["n_cols"], cell_values=cell_values, new_columns=[])
+        n_cols=n_cols, cell_values=cell_values, new_columns=new_columns,
+        cell_fills=cell_fills)
 
     comparable = sum(1 for r, c in choices.items()
                      if by_row.get(r) and by_row[r]["after"]
                      and c.get("score", 0) >= COMPARABLE)
-    with_after = sum(1 for r in choices if by_row.get(r) and by_row[r]["after"])
+    with_after = sum(1 for n in an["notes"] if n["after"])
     return {
         "notes": len(by_row),
         "with_after": with_after,
@@ -347,5 +468,9 @@ def write_output(an: Dict[str, Any], choices: Dict[int, Dict[str, Any]],
         "reordered": moved,
         "comparable": comparable,
         "not_comparable": with_after - comparable,
+        "review_notes": n_notes,
+        "hidden": n_hidden,
+        "returned": an.get("n_returned", 0),
+        "returned_noted": n_ret_noted,
         "stem": os.path.splitext(os.path.basename(src_path))[0],
     }

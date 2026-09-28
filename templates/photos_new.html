@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+
+  <div class="page-head">
+    <h1>مراجعة الصور</h1>
+    <p>
+      التقرير يأخذ «صورة قبل 1» و«صورة بعد 1» دائمًا، وهما كثيرًا ما لا تُقارنان.
+      هنا تمرّ على الملاحظات كلها في صفحة واحدة وتبدّل الصورة بضغطة حيث لا تعجبك.
+    </p>
+  </div>
+
+  {% if error %}<div class="errors">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ url_for('photos_start') }}" enctype="multipart/form-data">
+
+    <label class="dropzone" id="zone" for="excel_file">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+        <path d="m3 15 5-5 4 4 3-3 6 6"></path>
+      </svg>
+      <span class="dz-title" id="dzTitle">اسحب ملف الملاحظات هنا</span>
+      <span class="dz-hint" id="dzHint">أو اضغط للاختيار — يقرأ أعمدة «صورة قبل» و«صورة بعد»</span>
+    </label>
+    <input class="hidden-input" id="excel_file" type="file" name="excel_file"
+           accept=".xlsx,.xlsm" required>
+
+    <button class="btn" type="submit">جهّز الصور</button>
+    <span class="hint">
+      التجهيز ينزّل الصور ويصغّرها مرة واحدة، نحو ثماني دقائق لملف من ستمئة ملاحظة
+      (قياس فعلي: 1,345 صورة، 34 ميجا بعد التصغير). بعدها يصير التمرير فوريًا،
+      لأن الصورة الأصلية 1.1 ميجا والمستضيف لا يعطي نسخة مصغّرة.
+    </span>
+  </form>
+
+</div>
+
+<script>
+(function () {
+  var input = document.getElementById("excel_file");
+  var zone = document.getElementById("zone");
+  var title = document.getElementById("dzTitle");
+  var hint = document.getElementById("dzHint");
+  function show() {
+    if (!input.files || !input.files.length) return;
+    var f = input.files[0];
+    zone.classList.add("filled");
+    title.textContent = f.name;
+    hint.textContent = (f.size >= 1048576
+      ? (f.size / 1048576).toFixed(1) + " ميجابايت"
+      : Math.max(1, Math.round(f.size / 1024)) + " كيلوبايت") + " — جاهز للرفع";
+  }
+  input.addEventListener("change", show);
+  ["dragenter", "dragover"].forEach(function (e) {
+    zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.add("drag"); });
+  });
+  ["dragleave", "drop"].forEach(function (e) {
+    zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.remove("drag"); });
+  });
+  zone.addEventListener("drop", function (ev) {
+    if (ev.dataTransfer && ev.dataTransfer.files.length) { input.files = ev.dataTransfer.files; show(); }
+  });
+})();
+</script>
+{% endblock %}

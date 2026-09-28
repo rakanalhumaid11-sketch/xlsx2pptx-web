@@ -12,6 +12,7 @@ import fcntl
 import json
 import os
 import pickle
+import re
 import shutil
 import threading
 import time
@@ -27,6 +28,7 @@ import afterfill
 import approval
 import builder
 import matcher
+import photoreview
 import sorter
 import zones
 
@@ -1066,6 +1068,217 @@ def sort_download(job_id):
         abort(404)
     return send_file(state["output_path"], as_attachment=True,
                      download_name=sorter.suggested_name(state.get("stem") or "الملاحظات"))
+
+
+# --------------------------------------------------------------------------
+# مراجعة صور «قبل» و«بعد» بالعين
+# --------------------------------------------------------------------------
+
+def _photos_state(job_id):
+    d = job_dir(job_id)
+    state = read_state(d)
+    if state.get("kind") != "photos":
+        abort(404)
+    return d, state
+
+
+def _thumbs_dir(d):
+    return os.path.join(d, "thumbs")
+
+
+@app.route("/photos", methods=["GET"])
+def photos_form():
+    cleanup_old_jobs()
+    return render_template("photos_new.html")
+
+
+@app.route("/photos/start", methods=["POST"])
+def photos_start():
+    f = request.files.get("excel_file")
+    if not f or not f.filename:
+        return render_template("photos_new.html", error="الرجاء اختيار الملف أولًا."), 400
+    if not f.filename.lower().endswith((".xlsx", ".xlsm")):
+        return render_template("photos_new.html",
+                               error="الملف يجب أن يكون بصيغة ‎.xlsx‎."), 400
+
+    job_id, d = new_job_dir()
+    path = os.path.join(d, "input.xlsx")
+    f.save(path)
+    try:
+        an = photoreview.analyze(path)
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(d, ignore_errors=True)
+        return render_template("photos_new.html",
+                               error=f"تعذّرت قراءة الملف: {exc}"), 400
+    if not an["total"]:
+        shutil.rmtree(d, ignore_errors=True)
+        return render_template("photos_new.html",
+                               error="لا توجد ملاحظة واحدة لها صور في الملف."), 400
+
+    with open(os.path.join(d, "analysis.pkl"), "wb") as fh:
+        pickle.dump(an, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    write_state(d, {
+        "job_id": job_id,
+        "kind": "photos",
+        "stage": "preparing",
+        "stem": os.path.splitext(os.path.basename(f.filename))[0][:60] or "الملاحظات",
+        "main_path": path,
+        "n_notes": an["total"], "n_images": an["n_images"],
+        "with_after": an["with_after"],
+        "progress": {"done": 0, "total": an["n_images"]},
+        "updated_at": time.time(),
+        "created_at": time.time(),
+    })
+    threading.Thread(target=_run_photo_prep, args=(job_id,), daemon=True).start()
+    return redirect(url_for("photos_progress", job_id=job_id))
+
+
+def _run_photo_prep(job_id: str):
+    d = os.path.join(JOBS_DIR, job_id)
+    try:
+        an = _load_analysis(d)
+        last = [0.0]
+
+        def cb(done, total, stage=None):
+            now = time.time()
+            if now - last[0] < 0.7 and done < total:
+                return
+            last[0] = now
+            s = read_state(d)
+            s["progress"] = {"done": done, "total": total}
+            s["phase"] = stage or s.get("phase")
+            s["updated_at"] = now
+            write_state(d, s)
+
+        # التنزيل لا يأخذ القفل الثقيل: ذروته نحو ثلاثين ميجا (صورة واحدة
+        # في الذاكرة لكل خيط)، فحجزه ثماني دقائق يعطّل توليد التقارير بلا داعٍ
+        res = photoreview.prepare(an, _thumbs_dir(d), progress_cb=cb)
+
+        s = read_state(d)
+        s["stage"] = "ready"
+        s["prep"] = {"images": res["images"], "fetched": res["fetched"],
+                     "failed": len(res["failed"]),
+                     "mb": round(res["bytes"] / 1048576, 1)}
+        s["choices"] = {str(k): v for k, v in res["choices"].items()}
+        s["updated_at"] = time.time()
+        write_state(d, s)
+    except Exception as exc:  # noqa: BLE001
+        s = read_state(d)
+        s["stage"] = "error"
+        s["error_message"] = f"{type(exc).__name__}: {exc}"
+        write_state(d, s)
+
+
+@app.route("/job/<job_id>/photos/progress")
+def photos_progress(job_id):
+    _photos_state(job_id)
+    return render_template("photos_progress.html", job_id=job_id)
+
+
+@app.route("/job/<job_id>/photos/status")
+def photos_status(job_id):
+    _d, state = _photos_state(job_id)
+    return jsonify({
+        "stage": state.get("stage"),
+        "phase": state.get("phase"),
+        "progress": state.get("progress", {"done": 0, "total": 1}),
+        "error_message": state.get("error_message"),
+        "prep": state.get("prep"),
+        "stalled_for": int(time.time() - state["updated_at"]) if state.get("updated_at") else 0,
+    })
+
+
+@app.route("/job/<job_id>/photos")
+def photos_review(job_id):
+    d, state = _photos_state(job_id)
+    if state.get("stage") == "preparing":
+        return redirect(url_for("photos_progress", job_id=job_id))
+    an = _load_analysis(d)
+    choices = state.get("choices") or {}
+    notes = []
+    for n in an["notes"]:
+        ch = choices.get(str(n["row"])) or {}
+        notes.append({
+            "row": n["row"], "id": n["id"], "type": n["type"],
+            "inspect": n["inspect"], "maint": n["maint"],
+            "contractor": n["contractor"],
+            "before": [{"u": u, "k": photoreview.key_of(u)} for u in n["before"]],
+            "after": [{"u": u, "k": photoreview.key_of(u)} for u in n["after"]],
+            "pb": ch.get("before", n["before"][0] if n["before"] else ""),
+            "pa": ch.get("after", n["after"][0] if n["after"] else ""),
+            "score": ch.get("score", 0),
+        })
+    return render_template("photos_review.html", job_id=job_id, state=state,
+                           notes=notes, key=photoreview.key_of,
+                           comparable=photoreview.COMPARABLE)
+
+
+@app.route("/job/<job_id>/photos/thumb/<name>")
+def photos_thumb(job_id, name):
+    d, _state = _photos_state(job_id)
+    if not re.fullmatch(r"[0-9a-f]{32}\.jpg", name or ""):
+        abort(404)
+    p = os.path.join(_thumbs_dir(d), name)
+    if not os.path.exists(p):
+        abort(404)
+    # المصغّرات ثابتة لا تتغيّر، فنسمح للمتصفح بتخزينها: التمرير صعودًا
+    # وهبوطًا في ستمئة ملاحظة لا يجوز أن يعيد تنزيل الصور في كل مرة
+    resp = send_file(p, mimetype="image/jpeg", conditional=True)
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
+
+@app.route("/job/<job_id>/photos/save", methods=["POST"])
+def photos_save(job_id):
+    d, state = _photos_state(job_id)
+    data = request.get_json(silent=True) or {}
+    picks = data.get("picks") or {}
+    choices = state.get("choices") or {}
+    n = 0
+    for row, v in picks.items():
+        if not isinstance(v, dict):
+            continue
+        c = dict(choices.get(str(row)) or {})
+        for k in ("before", "after"):
+            if isinstance(v.get(k), str):
+                c[k] = v[k]
+        c.setdefault("score", 0)
+        choices[str(row)] = c
+        n += 1
+    state["choices"] = choices
+    state["reviewed"] = sorted(set(state.get("reviewed", [])) | set(map(str, picks)))
+    write_state(d, state)
+    return jsonify({"ok": True, "saved": n})
+
+
+@app.route("/job/<job_id>/photos/build", methods=["POST"])
+def photos_build(job_id):
+    d, state = _photos_state(job_id)
+    an = _load_analysis(d)
+    src = state.get("main_path") or ""
+    if not os.path.exists(src):
+        abort(410)
+    choices = {int(k): v for k, v in (state.get("choices") or {}).items()}
+    out_path = os.path.join(d, "output.xlsx")
+    try:
+        result = photoreview.write_output(an, choices, src, out_path)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": f"{exc}"}), 500
+    state["result"] = result
+    state["output_path"] = out_path
+    write_state(d, state)
+    return jsonify({"ok": True, "result": result,
+                    "url": url_for("photos_download", job_id=job_id)})
+
+
+@app.route("/job/<job_id>/photos/download")
+def photos_download(job_id):
+    _d, state = _photos_state(job_id)
+    if not state.get("output_path") or not os.path.exists(state["output_path"]):
+        abort(404)
+    stem = state.get("stem") or "الملاحظات"
+    return send_file(state["output_path"], as_attachment=True,
+                     download_name=f"{stem} - صور مختارة.xlsx")
 
 
 if __name__ == "__main__":

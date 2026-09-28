@@ -779,3 +779,82 @@ input[type="number"] { -moz-appearance: textfield; }
   color: #F0B429;
   background: rgba(240, 180, 41, 0.07);
 }
+
+/* --------------------------------------------- شاشة مراجعة الصور بالتمرير */
+
+.rv-bar {
+  position: sticky; top: 0; z-index: 8;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 18px;
+  margin-bottom: 14px; padding: 12px 18px;
+  background: rgba(15, 22, 32, 0.96);
+  border: 1px solid var(--border-2); border-radius: 12px;
+  backdrop-filter: blur(6px);
+}
+.rv-stat { display: flex; align-items: baseline; gap: 7px; }
+.rv-stat b { font-size: 22px; color: var(--text); font-variant-numeric: tabular-nums; }
+.rv-stat span { font-size: 12px; color: var(--dim); }
+.rv-stat.muted b { color: var(--dim); }
+.rv-actions { margin-inline-start: auto; display: flex; align-items: center; gap: 14px; }
+.rv-seg { display: inline-flex; border: 1px solid var(--border-2); border-radius: 9px; overflow: hidden; }
+.rv-seg button {
+  font-family: inherit; font-size: 13px; font-weight: 400;
+  padding: 7px 13px; min-height: 36px;
+  color: var(--muted); background: transparent; border: 0; cursor: pointer;
+}
+.rv-seg button + button { border-inline-start: 1px solid var(--border-2); }
+.rv-seg button:hover { background: #16222F; }
+.rv-seg button.on { color: var(--accent-ink); background: var(--accent); }
+.rv-saved { font-size: 12px; color: var(--ok); min-width: 54px; }
+.rv-actions .btn-small { margin: 0; }
+
+.rv {
+  padding: 12px 0 16px;
+  border-bottom: 1px solid var(--border);
+  /* التمرير في ستمئة ملاحظة: نخبر المتصفح أن يتخطّى رسم ما خرج عن الشاشة */
+  content-visibility: auto;
+  contain-intrinsic-size: 350px;
+}
+.rv.touched { background: rgba(111, 192, 245, 0.05); }
+.rv-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+.rv-id { font-size: 13px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.rv-type { font-size: 14px; color: #C3CCD9; }
+.rv-note { font-size: 12px; color: var(--dim); }
+.rv-flag {
+  margin-inline-start: auto; flex: none;
+  font-size: 11px; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--border-2); color: var(--dim);
+}
+.rv-flag.ok { color: var(--ok); border-color: rgba(120, 200, 150, 0.4); }
+.rv-flag.weak { color: #F0B429; border-color: rgba(240, 180, 41, 0.4); }
+
+.rv-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.rv-side { position: relative; }
+.rv-lbl {
+  position: absolute; top: 6px; inset-inline-start: 6px; z-index: 2;
+  font-size: 11px; padding: 2px 8px; border-radius: 6px;
+  color: #0F1620; background: rgba(255, 255, 255, 0.82);
+}
+/* contain لا cover: الحكم على الزاوية يقتضي رؤية الإطار كاملًا، والقصّ
+   يخفي أطراف المشهد التي يُعرف بها الموقع */
+.rv-main {
+  display: block; width: 100%; height: 250px; object-fit: contain;
+  border-radius: 10px; background: #0B1118; border: 1px solid var(--border);
+}
+.rv-empty {
+  height: 250px; display: flex; align-items: center; justify-content: center;
+  color: var(--dim); border: 1px dashed var(--border-2); border-radius: 10px;
+}
+.rv-alts { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.rv-alt {
+  width: 66px; height: 50px; object-fit: cover;
+  border-radius: 6px; cursor: pointer; opacity: 0.55;
+  border: 2px solid transparent; background: #0B1118;
+}
+.rv-alt:hover { opacity: 0.85; }
+.rv-alt.on { opacity: 1; border-color: var(--accent); }
+
+@media (max-width: 720px) {
+  .rv-pair { grid-template-columns: 1fr; }
+  .rv-main, .rv-empty { height: 240px; }
+  .rv-actions { margin-inline-start: 0; width: 100%; }
+}

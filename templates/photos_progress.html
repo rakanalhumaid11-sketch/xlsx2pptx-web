@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+
+  <div class="page-head">
+    <h1 id="t">جاري تجهيز الصور</h1>
+    <p id="hint">تُنزَّل الصور مرة واحدة وتُصغَّر، ثم يُرشَّح أقرب زوج لكل ملاحظة. لا تغلق الصفحة.</p>
+  </div>
+
+  <div id="live">
+    <div class="pct" id="pct">0%</div>
+    <div class="progress-wrap"><div class="progress-bar" id="bar"></div></div>
+    <span class="hint" id="counter"></span>
+    <div id="stall"></div>
+  </div>
+
+  <div id="err"></div>
+
+</div>
+
+<script>
+var jobId = "{{ job_id }}";
+var PHASE = {download: "تنزيل الصور وتصغيرها", rank: "ترشيح أقرب زوج لكل ملاحظة"};
+
+function poll() {
+  fetch("/job/" + jobId + "/photos/status").then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.stage === "error") {
+        document.getElementById("t").textContent = "تعذّر التجهيز";
+        document.getElementById("hint").textContent = "";
+        document.getElementById("live").style.display = "none";
+        document.getElementById("err").innerHTML =
+          '<div class="errors">' + (d.error_message || "خطأ غير معروف") + "</div>";
+        return;
+      }
+      if (d.stage === "ready") { location.href = "/job/" + jobId + "/photos"; return; }
+
+      var p = d.progress || {done: 0, total: 1};
+      var pct = p.total > 0 ? Math.round((p.done / p.total) * 100) : 0;
+      document.getElementById("bar").style.width = pct + "%";
+      document.getElementById("pct").textContent = pct + "%";
+      document.getElementById("counter").textContent =
+        (PHASE[d.phase] || "") + " — " + p.done + " من " + p.total;
+      document.getElementById("stall").innerHTML = (d.stalled_for > 180)
+        ? '<div class="errors">لم يتقدّم التجهيز منذ ' + Math.round(d.stalled_for / 60) +
+          " دقائق. يُرجَّح أن العملية توقفت — أعد المحاولة.</div>" : "";
+      setTimeout(poll, p.done > 30 ? 2500 : 1200);
+    }).catch(function () { setTimeout(poll, 3000); });
+}
+poll();
+</script>
+{% endblock %}

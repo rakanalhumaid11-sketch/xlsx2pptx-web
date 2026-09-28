@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap-wide">
+
+  <div class="rv-bar">
+    <div class="rv-stat"><b id="rvTotal">{{ notes|length }}</b><span>ملاحظة</span></div>
+    <div class="rv-stat"><b id="rvChanged">0</b><span>غيّرتها</span></div>
+    <div class="rv-stat muted"><b>{{ state.with_after }}</b><span>لها صور «بعد»</span></div>
+    <div class="rv-actions">
+      <span class="rv-seg" id="filter">
+        <button type="button" data-f="after" class="on">لها صور «بعد»</button>
+        <button type="button" data-f="weak">زاويتان مختلفتان</button>
+        <button type="button" data-f="all">الكل</button>
+      </span>
+      <span class="rv-saved" id="saved"></span>
+      <button class="btn-small" id="goBuild">تحميل الملف</button>
+    </div>
+  </div>
+
+  <div id="list">
+    {% for n in notes %}
+    <section class="rv" data-row="{{ n.row }}"
+             data-hasafter="{{ 1 if n.after else 0 }}"
+             data-weak="{{ 1 if (n.after and n.score < comparable) else 0 }}">
+      <div class="rv-head">
+        <span class="rv-id" dir="ltr">{{ n.id }}</span>
+        <span class="rv-type">{{ n.type }}</span>
+        {% if n.inspect %}<span class="rv-note">{{ n.inspect }}</span>{% endif %}
+        {% if n.after %}
+          <span class="rv-flag {{ 'ok' if n.score >= comparable else 'weak' }}">
+            {{ 'يصلح للمقارنة' if n.score >= comparable else 'زاويتان مختلفتان' }}
+          </span>
+        {% else %}
+          <span class="rv-flag none">لا توجد صورة «بعد»</span>
+        {% endif %}
+      </div>
+
+      <div class="rv-pair">
+        {% for side, items, pick in (('before', n.before, n.pb), ('after', n.after, n.pa)) %}
+        <div class="rv-side" data-side="{{ side }}">
+          <span class="rv-lbl">{{ 'قبل' if side == 'before' else 'بعد' }}</span>
+          {% if items %}
+          <img class="rv-main" loading="lazy" alt=""
+               src="{{ url_for('photos_thumb', job_id=job_id, name=key(pick) + '.jpg') }}">
+          {% if items|length > 1 %}
+          <div class="rv-alts">
+            {% for it in items %}
+            <img class="rv-alt {{ 'on' if it.u == pick else '' }}" loading="lazy" alt=""
+                 data-u="{{ it.u }}"
+                 src="{{ url_for('photos_thumb', job_id=job_id, name=it.k + '.jpg') }}">
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% else %}
+          <div class="rv-empty">—</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
+  </div>
+
+  <div id="buildBox"></div>
+
+</div>
+
+<script>
+(function () {
+  var jobId = "{{ job_id }}";
+  var pending = {}, timer = null, changed = 0;
+  var saved = document.getElementById("saved");
+
+  function flush() {
+    var picks = pending; pending = {};
+    if (!Object.keys(picks).length) return;
+    saved.textContent = "يحفظ…";
+    fetch("/job/" + jobId + "/photos/save", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({picks: picks})
+    }).then(function (r) { return r.json(); })
+      .then(function () { saved.textContent = "محفوظ"; })
+      .catch(function () { saved.textContent = "تعذّر الحفظ — أعد المحاولة"; });
+  }
+
+  // نجمع التبديلات ونرسلها دفعة كل ثانية: التمرير السريع قد يبدّل عشرات
+  // الصور في ثوانٍ، وطلب لكل ضغطة يُغرق الخادم المجاني
+  function queue(row, side, url) {
+    pending[row] = pending[row] || {};
+    pending[row][side] = url;
+    clearTimeout(timer);
+    timer = setTimeout(flush, 900);
+  }
+
+  document.getElementById("list").addEventListener("click", function (ev) {
+    var alt = ev.target.closest(".rv-alt");
+    if (!alt) return;
+    var side = alt.closest(".rv-side");
+    var card = alt.closest(".rv");
+    if (alt.classList.contains("on")) return;
+    side.querySelectorAll(".rv-alt").forEach(function (x) { x.classList.remove("on"); });
+    alt.classList.add("on");
+    side.querySelector(".rv-main").src = alt.src;
+    if (!card.classList.contains("touched")) {
+      card.classList.add("touched");
+      changed += 1;
+      document.getElementById("rvChanged").textContent = changed;
+    }
+    queue(card.dataset.row, side.dataset.side, alt.dataset.u);
+  });
+
+  // الفرز الافتراضي «لها صور بعد»: الملاحظة بلا صورة «بعد» لا شيء فيها
+  // يُقارَن، وعرضها يضاعف التمرير ثلاث مرات بلا فائدة
+  function applyFilter(f) {
+    var shown = 0;
+    document.querySelectorAll(".rv").forEach(function (c) {
+      var keep = f === "all" ? true
+        : f === "after" ? c.dataset.hasafter === "1"
+        : c.dataset.weak === "1";
+      c.style.display = keep ? "" : "none";
+      if (keep) shown += 1;
+    });
+    document.getElementById("rvTotal").textContent = shown;
+  }
+  document.getElementById("filter").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button[data-f]");
+    if (!b) return;
+    this.querySelectorAll("button").forEach(function (x) { x.classList.remove("on"); });
+    b.classList.add("on");
+    applyFilter(b.dataset.f);
+    window.scrollTo({top: 0});
+  });
+  applyFilter("after");
+
+  document.getElementById("goBuild").addEventListener("click", function () {
+    flush();
+    var box = document.getElementById("buildBox");
+    box.innerHTML = '<p class="hint">يبني الملف…</p>';
+    setTimeout(function () {
+      fetch("/job/" + jobId + "/photos/build", {method: "POST"})
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.ok) { box.innerHTML = '<div class="errors">' + (d.error || "خطأ") + "</div>"; return; }
+          var r = d.result;
+          box.innerHTML =
+            '<ul class="stats">' +
+            "<li><span>ملاحظات</span><b>" + r.notes + "</b></li>" +
+            "<li><span>أعمدة صور أُعيد ترتيبها</span><b>" + r.reordered + "</b></li>" +
+            "<li><span>يصلح للمقارنة</span><b>" + r.comparable + "</b></li>" +
+            "<li><span>زاويتان مختلفتان</span><b>" + r.not_comparable + "</b></li>" +
+            "<li><span>بلا صورة «بعد»</span><b>" + r.no_after + "</b></li>" +
+            "</ul><a class='btn' href='" + d.url + "'>تحميل الملف</a>";
+          box.scrollIntoView({behavior: "smooth"});
+        });
+    }, 300);
+  });
+
+  window.addEventListener("beforeunload", flush);
+})();
+</script>
+{% endblock %}

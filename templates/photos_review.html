@@ -9,6 +9,9 @@
     {% if n_returned %}
     <div class="rv-stat red"><b>{{ n_returned }}</b><span>مسترجعة</span></div>
     {% endif %}
+    {% if n_blocked %}
+    <div class="rv-stat orange"><b>{{ n_blocked }}</b><span>غير قادر على العمل</span></div>
+    {% endif %}
     <div class="rv-actions">
       <span class="rv-seg" id="filter">
         <button type="button" data-f="after" class="on">لها صور «بعد»</button>
@@ -17,6 +20,12 @@
         <button type="button" data-f="noted">عليها ملاحظة</button>
         <button type="button" data-f="all">الكل</button>
       </span>
+      <select id="stFilter" class="rv-stsel" aria-label="الحالة">
+        <option value="">كل الحالات</option>
+        {% for e in statuses %}
+        <option value="{{ e.label }}">{{ e.label }} ({{ e.n }})</option>
+        {% endfor %}
+      </select>
       <span class="rv-saved" id="saved"></span>
       <button class="btn-small" id="goBuild">تحميل الملف</button>
     </div>
@@ -25,19 +34,18 @@
   <div id="list">
     {% for n in notes %}
     {% set noted = n.tags or n.text %}
-    <section class="rv {{ 'returned' if n.returned else '' }} {{ 'noted' if noted else '' }}"
+    <section class="rv {{ 'returned' if n.returned else '' }} {{ 'blocked' if n.blocked else '' }} {{ 'noted' if noted else '' }}"
              data-row="{{ n.row }}"
              data-hasafter="{{ 1 if n.after else 0 }}"
              data-weak="{{ 1 if (n.after and n.score < comparable) else 0 }}"
              data-ret="{{ 1 if n.returned else 0 }}"
+             data-st="{{ n.st.label }}"
              data-hideset="{{ 1 if n.hide_set else 0 }}">
       <div class="rv-head">
         <span class="rv-id" dir="ltr">{{ n.id }}</span>
         <span class="rv-type">{{ n.type }}</span>
         {% if n.inspect %}<span class="rv-note">{{ n.inspect }}</span>{% endif %}
-        {% if n.returned %}
-          <span class="rv-ret">مسترجعة — أُعيدت المعالجة للمقاول</span>
-        {% endif %}
+        <span class="rv-st st-{{ n.st.kind }}" title="{{ n.status or 'بلا حالة في الملف' }}">{{ n.st.label }}</span>
         {% if n.after %}
           <span class="rv-flag {{ 'ok' if n.score >= comparable else 'weak' }}">
             {{ 'يصلح للمقارنة' if n.score >= comparable else 'زاويتان مختلفتان' }}
@@ -231,14 +239,18 @@
     if (on) setHide(c, on.dataset.hide === "1");
   });
 
-  function applyFilter(f) {
-    var shown = 0;
+  var curF = "after";
+  var stSel = document.getElementById("stFilter");
+  // مرشّح الصور وقائمة الحالة يعملان معًا: «لها صور بعد» + «تم الاقفال» مثلًا
+  function applyFilter() {
+    var f = curF, st = stSel.value, shown = 0;
     document.querySelectorAll(".rv").forEach(function (c) {
       var keep = f === "all" ? true
         : f === "after" ? c.dataset.hasafter === "1"
         : f === "weak" ? c.dataset.weak === "1"
         : f === "ret" ? c.dataset.ret === "1"
         : c.classList.contains("noted");
+      if (keep && st) keep = c.dataset.st === st;
       c.style.display = keep ? "" : "none";
       if (keep) shown += 1;
     });
@@ -249,10 +261,12 @@
     if (!b) return;
     this.querySelectorAll("button").forEach(function (x) { x.classList.remove("on"); });
     b.classList.add("on");
-    applyFilter(b.dataset.f);
+    curF = b.dataset.f;
+    applyFilter();
     window.scrollTo({top: 0});
   });
-  applyFilter("after");
+  stSel.addEventListener("change", function () { applyFilter(); window.scrollTo({top: 0}); });
+  applyFilter();
 
   document.getElementById("goBuild").addEventListener("click", function () {
     var box = document.getElementById("buildBox");

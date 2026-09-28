@@ -1205,7 +1205,9 @@ def photos_review(job_id):
             "row": n["row"], "id": n["id"], "type": n["type"],
             "inspect": n["inspect"], "maint": n["maint"],
             "contractor": n["contractor"],
-            "status": n.get("status", ""), "returned": bool(n.get("returned")),
+            "status": n.get("status", ""),
+            # الحالة تُحسب هنا لا من التحليل المحفوظ، فتعمل على الجلسات القديمة أيضًا
+            "st": photoreview.status_info(n.get("status", "")),
             "before": [{"u": u, "k": photoreview.key_of(u)} for u in n["before"]],
             "after": [{"u": u, "k": photoreview.key_of(u)} for u in n["after"]],
             "pb": ch.get("before", n["before"][0] if n["before"] else ""),
@@ -1215,12 +1217,26 @@ def photos_review(job_id):
             "hide": photoreview.resolve_hide({"tags": tags, "hide": hide}),
             "hide_set": isinstance(hide, bool),
         })
+        notes[-1]["returned"] = notes[-1]["st"]["kind"] == "returned"
+        notes[-1]["blocked"] = notes[-1]["st"]["kind"] == "blocked"
+    # قائمة الحالات بأعدادها لقائمة الفرز، بترتيب ثابت يبدأ بما يحتاج انتباهًا
+    order = ["returned", "blocked", "done", "wait", "ok", "other", "none"]
+    st_counts: Dict[str, Dict[str, Any]] = {}
+    for n in notes:
+        e = st_counts.setdefault(n["st"]["label"], {"label": n["st"]["label"],
+                                                     "kind": n["st"]["kind"], "n": 0})
+        e["n"] += 1
+    statuses = sorted(st_counts.values(), key=lambda e: (order.index(e["kind"])
+                                                        if e["kind"] in order else 99,
+                                                        -e["n"]))
     return render_template("photos_review.html", job_id=job_id, state=state,
                            notes=notes, key=photoreview.key_of,
                            comparable=photoreview.COMPARABLE,
                            presets=photoreview.PRESETS,
                            hide_presets=sorted(photoreview.HIDE_BY_DEFAULT),
                            n_returned=sum(1 for n in notes if n["returned"]),
+                           n_blocked=sum(1 for n in notes if n["blocked"]),
+                           statuses=statuses,
                            n_noted=sum(1 for n in notes if n["tags"] or n["text"].strip()))
 
 

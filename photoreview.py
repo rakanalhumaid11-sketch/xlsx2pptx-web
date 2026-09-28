@@ -74,6 +74,52 @@ RETURNED = {"RETURNED", "REJECTED", "مسترجع", "مسترجعة", "معاد"
             "مرتجع", "مرتجعة", "مرفوض", "مرفوضة"}
 
 
+# حالات النظام بأسمائها العربية ونوعها (يحدّد لون الشارة في الصفحة). الأسماء
+# نفسها المستعملة في أداة حالة الاعتماد حتى لا تختلف التسمية بين الأداتين.
+# و«غير قادر على العمل» حالة مستقلة لا تُدمج في «بانتظار المعالجة»: الفريق
+# وصل ولم يستطع، وهذا يحتاج قرارًا لا انتظارًا.
+STATUS_INFO: Dict[str, Tuple[str, str]] = {
+    "APPROVED": ("تم الاقفال", "ok"),
+    "ACCEPTED": ("تم الاقفال", "ok"),
+    "CLOSED": ("تم الاقفال", "ok"),
+    "DONE": ("بانتظار الاقفال", "done"),
+    "COMPLETED": ("بانتظار الاقفال", "done"),
+    "FINISHED": ("بانتظار الاقفال", "done"),
+    "RETURNED": ("مسترجعة — أُعيدت المعالجة للمقاول", "returned"),
+    "REJECTED": ("مسترجعة — أُعيدت المعالجة للمقاول", "returned"),
+    "REOPENED": ("مسترجعة — أُعيدت المعالجة للمقاول", "returned"),
+    "WORK_NOT_POSSIBLE": ("غير قادر على العمل", "blocked"),
+    "IN_PROGRESS": ("جاري العمل", "wait"),
+    "ASSIGNED": ("مُسندة — بانتظار المعالجة", "wait"),
+    "NEW": ("جديدة — بانتظار المعالجة", "wait"),
+    "OPEN": ("جديدة — بانتظار المعالجة", "wait"),
+}
+_AR_STATUS = {
+    "تم الاقفال": "APPROVED", "موافق عليها": "APPROVED", "موافق عليه": "APPROVED",
+    "بانتظار الاقفال": "DONE", "تمت المعالجة": "DONE", "منجز": "DONE",
+    "مسترجع": "RETURNED", "مسترجعة": "RETURNED", "معاد": "RETURNED",
+    "معادة": "RETURNED", "مرتجع": "RETURNED", "مرتجعة": "RETURNED",
+    "مرفوض": "RETURNED", "مرفوضة": "RETURNED",
+    "غير قادر على العمل": "WORK_NOT_POSSIBLE", "تعذر العمل": "WORK_NOT_POSSIBLE",
+    "بانتظار المعالجة": "NEW", "جديد": "NEW", "جديدة": "NEW",
+}
+
+
+def status_info(status: str) -> Dict[str, str]:
+    """{"code", "label", "kind"} لحالة الملاحظة كما جاءت من النظام."""
+    raw = (status or "").strip()
+    if not raw or raw.lower() in ("none", "null", "-"):
+        return {"code": "", "label": "بلا حالة", "kind": "none"}
+    code = raw.upper().replace(" ", "_")
+    if code not in STATUS_INFO:
+        code = _AR_STATUS.get(raw) or next(
+            (v for k, v in _AR_STATUS.items() if _norm(k) == _norm(raw)), code)
+    if code in STATUS_INFO:
+        label, kind = STATUS_INFO[code]
+        return {"code": code, "label": label, "kind": kind}
+    return {"code": raw, "label": raw, "kind": "other"}
+
+
 def is_returned(status: str) -> bool:
     t = (status or "").strip()
     return t.upper() in RETURNED or _norm(t) in {_norm(x) for x in RETURNED}
@@ -186,12 +232,14 @@ def analyze(path: str) -> Dict[str, Any]:
         if not b and not a:
             continue
         status = g(st_c)
+        sinfo = status_info(status)
         tags, text = split_note(g(rv_c))
         notes.append({
             "row": i + 1,                       # رقم الصف في إكسل
             "id": g(id_c), "type": g(ty_c),
             "inspect": g(in_c), "maint": g(mt_c), "contractor": g(ct_c),
-            "status": status, "returned": is_returned(status),
+            "status": status, "returned": sinfo["kind"] == "returned",
+            "blocked": sinfo["kind"] == "blocked",
             "before": b, "after": a,
             # قيم الأعمدة في مواضعها الأصلية (بفراغاتها): المخرج يبادل خليتين
             # فقط، ولو أعاد رصّ القائمة المنظّفة لحذف تكرارًا أو أزاح فراغًا
@@ -208,6 +256,7 @@ def analyze(path: str) -> Dict[str, Any]:
         "review_col": rv_c,
         "photo_col": ph_c,
         "n_returned": sum(1 for n in notes if n["returned"]),
+        "n_blocked": sum(1 for n in notes if n["blocked"]),
         "before_cols": before,
         "after_cols": after,
         "notes": notes,

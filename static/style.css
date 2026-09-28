@@ -933,3 +933,39 @@ input[type="number"] { -moz-appearance: textfield; }
   border: 1px dashed var(--border-2); border-radius: 10px;
 }
 .rv-alt.gone { opacity: 0.25; border-style: dashed; border-color: var(--border-2); }
+
+/* ----------------------------------- شارة الحالة على كل بطاقة */
+
+.rv-st {
+  flex: none;
+  font-size: 12px; font-weight: 500; line-height: 1;
+  padding: 5px 10px; border-radius: 999px;
+  border: 1px solid transparent;
+}
+.rv-st.st-ok       { color: #8CE0A8; background: rgba(46, 160, 90, 0.16); border-color: rgba(46, 160, 90, 0.45); }
+.rv-st.st-done     { color: #8FD3F4; background: rgba(60, 150, 210, 0.16); border-color: rgba(60, 150, 210, 0.45); }
+.rv-st.st-wait     { color: var(--muted); background: rgba(255, 255, 255, 0.04); border-color: var(--border-2); }
+.rv-st.st-none,
+.rv-st.st-other    { color: var(--dim); border-color: var(--border-2); border-style: dashed; }
+/* ما يحتاج قرارًا: مسترجعة بالأحمر، وغير قادر على العمل بالبرتقالي — كلاهما
+   صريح اللون، ومختلفان حتى لا يُخلط أحدهما بالآخر في التمرير */
+.rv-st.st-returned { color: #fff; background: #D92D2D; }
+.rv-st.st-blocked  { color: #1A0E00; background: #F08C00; }
+
+.rv.blocked {
+  background: rgba(240, 140, 0, 0.10);
+  border-inline-start: 5px solid #F08C00;
+  padding-inline-start: 12px;
+  border-radius: 6px;
+}
+.rv-stat.orange b { color: #FFA94D; }
+.rv-stat.orange span { color: #FFC078; }
+
+.rv-stsel {
+  width: auto !important; min-width: 170px;
+  min-height: 36px !important; height: 36px; font-size: 13px !important;
+  padding: 0 10px !important;
+}
+/* أزرار الشريط لا تنكسر داخلها؛ الشريط نفسه يلتفّ إلى سطر ثانٍ عند الضيق */
+.rv-seg button, .rv-actions .btn-small { white-space: nowrap; }
+.rv-actions { flex-wrap: wrap; justify-content: flex-end; }

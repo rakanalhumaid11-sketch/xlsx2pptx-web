@@ -969,3 +969,30 @@ input[type="number"] { -moz-appearance: textfield; }
 /* أزرار الشريط لا تنكسر داخلها؛ الشريط نفسه يلتفّ إلى سطر ثانٍ عند الضيق */
 .rv-seg button, .rv-actions .btn-small { white-space: nowrap; }
 .rv-actions { flex-wrap: wrap; justify-content: flex-end; }
+
+/* ------------------------------------------ مفتاح تشغيل/إغلاق */
+
+.switch-row {
+  display: flex; align-items: flex-start; gap: 14px;
+  margin-top: 24px; padding: 14px 16px;
+  background: var(--surface); border: 1px solid var(--border-2);
+  border-radius: 12px; cursor: pointer;
+}
+.switch { position: relative; flex: none; width: 46px; height: 26px; margin-top: 2px; }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.switch-knob {
+  position: absolute; inset: 0; border-radius: 999px;
+  background: #2C3B4E; transition: background .18s;
+}
+.switch-knob::after {
+  content: ""; position: absolute; top: 3px; inset-inline-start: 3px;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: #C3CCD9; transition: transform .18s, background .18s;
+}
+.switch input:checked + .switch-knob { background: var(--accent); }
+.switch input:checked + .switch-knob::after { background: #fff; transform: translateX(-20px); }
+[dir="ltr"] .switch input:checked + .switch-knob::after { transform: translateX(20px); }
+.switch input:focus-visible + .switch-knob { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
+.switch-text { display: flex; flex-direction: column; gap: 3px; }
+.switch-text b { font-size: 14px; font-weight: 500; color: #C3CCD9; }
+.switch-text em { font-style: normal; font-size: 12px; color: var(--dim); }

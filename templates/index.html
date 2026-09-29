@@ -28,6 +28,18 @@
       <input type="text" name="notice" placeholder="4121050117" inputmode="numeric">
     </label>
 
+    <input type="hidden" name="maps_link_sent" value="1">
+    <label class="switch-row">
+      <span class="switch">
+        <input type="checkbox" name="maps_link" value="1" id="mapsLink" checked>
+        <span class="switch-knob" aria-hidden="true"></span>
+      </span>
+      <span class="switch-text">
+        <b>رابط الموقع على الإحداثيات</b>
+        <em id="mapsHint">مفعّل — الضغط على الإحداثيات في الشريحة يفتح الموقع في خرائط جوجل</em>
+      </span>
+    </label>
+
     <button class="btn" type="submit">توليد التقرير</button>
   </form>
 
@@ -49,6 +61,24 @@
     }
   }
   input.addEventListener("change", show);
+
+  // الخيار يُحفظ في المتصفح، فمن أغلقه مرة لا يضطر لإغلاقه في كل تقرير
+  var ml = document.getElementById("mapsLink");
+  var mh = document.getElementById("mapsHint");
+  function paintMaps() {
+    mh.textContent = ml.checked
+      ? "مفعّل — الضغط على الإحداثيات في الشريحة يفتح الموقع في خرائط جوجل"
+      : "مغلق — تُكتب الإحداثيات نصًّا بلا رابط";
+  }
+  try {
+    var saved = localStorage.getItem("maps_link");
+    if (saved !== null) ml.checked = saved === "1";
+  } catch (e) {}
+  paintMaps();
+  ml.addEventListener("change", function () {
+    paintMaps();
+    try { localStorage.setItem("maps_link", ml.checked ? "1" : "0"); } catch (e) {}
+  });
 
   ["dragenter", "dragover"].forEach(function (e) {
     zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.add("drag"); });

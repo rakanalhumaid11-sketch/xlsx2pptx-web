@@ -138,6 +138,10 @@ def index():
 def start():
     excel = request.files.get("excel_file")
     notice = (request.form.get("notice") or "").strip()
+    # مربع غير مؤشَّر لا يُرسَل أصلًا، فغيابه يعني «مغلق»؛ والحقل المخفي
+    # maps_link_sent يفرّق بين «أغلقه المستخدم» ونموذج قديم لا يعرف الخيار
+    maps_link = (bool(request.form.get("maps_link"))
+                 if request.form.get("maps_link_sent") else True)
 
     if not excel or not excel.filename:
         return render_template("index.html", error="الرجاء اختيار ملف الإكسل أولًا."), 400
@@ -152,6 +156,7 @@ def start():
         "job_id": job_id,
         "excel_path": excel_path,
         "notice": notice,
+        "maps_link": maps_link,
         "output_path": os.path.join(d, "report.pptx"),
         "stage": "queued",
         "progress": {"done": 0, "total": 1},
@@ -193,6 +198,7 @@ def _run_generation(job_id: str):
             result = builder.build_report(
                 state["excel_path"], state["output_path"],
                 notice=state.get("notice", ""), progress_cb=progress_cb,
+                maps_link=state.get("maps_link", True),
             )
 
         # ملف الإكسل ضخم (يحوي الصور بداخله) ولم نعد بحاجته بعد بناء التقرير،

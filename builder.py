@@ -508,7 +508,7 @@ def draw_review_banner(slide, pic, note: str):
 
 def fill_note(slide, rec: Dict[str, str], feeder: str, notice: str,
               images: Optional["ImageSource"] = None, img=_UNSET,
-              img_after=_UNSET) -> Tuple[bool, bool]:
+              img_after=_UNSET, maps_link: bool = True) -> Tuple[bool, bool]:
     """يملأ شريحة ملاحظة واحدة بصورتَي «قبل» و«بعد». يرجع (وُضعت قبل، وُضعت بعد)."""
     header = "صيانة المغذي"
     if feeder:
@@ -526,10 +526,14 @@ def fill_note(slide, rec: Dict[str, str], feeder: str, notice: str,
     if coords_shape is not None:
         text = f"{lat}, {lon}" if lat and lon else (lat or lon)
         engine.set_shape_text_preserve_style(coords_shape, text)
-        if lat and lon:
-            url = engine.maps_url(lat, lon)
-            if url:
-                engine.set_hyperlink(coords_shape, url)
+        # رابط خرائط جوجل على الإحداثيات اختياري: بعض الجهات تطبع التقرير أو
+        # ترسله PDF فلا فائدة من الرابط، وبعضها لا يريد روابط خارجية في ملفاته.
+        # الإحداثيات نفسها تُكتب في الحالتين. ورابط القالب يُزال أولًا دائمًا
+        # (انظر engine.clear_hyperlink) — وإلا بقي يشير إلى موقع آخر
+        engine.clear_hyperlink(coords_shape)
+        url = engine.maps_url(lat, lon) if (lat and lon and maps_link) else None
+        if url:
+            engine.set_hyperlink(coords_shape, url)
 
     def fetch(url, cached):
         if cached is not _UNSET:
@@ -572,7 +576,8 @@ def fill_note(slide, rec: Dict[str, str], feeder: str, notice: str,
 def _build_one(out_path: str, part_records: List[Dict[str, str]], feeder: str,
                notice: str, counts: List[Tuple[str, int]], totals: Dict[str, int],
                images: "ImageSource", part: Tuple[int, int],
-               progress_cb=None, offset: int = 0, grand_total: int = 0) -> Dict[str, int]:
+               progress_cb=None, offset: int = 0, grand_total: int = 0,
+               maps_link: bool = True) -> Dict[str, int]:
     """يبني ملفًا واحدًا لمجموعة ملاحظات، ويحفظه ثم يتركه للذاكرة أن تتحرر.
 
     الملخص والأرقام تخصّ المغذي كاملًا في كل جزء (لا جزءه فقط)، لأنها حقيقة
@@ -611,7 +616,8 @@ def _build_one(out_path: str, part_records: List[Dict[str, str]], feeder: str,
             img = blobs.get((rec.get("photo1", "") or "").strip())
             aft = blobs.get((rec.get("photo_after", "") or "").strip())
             before, after = fill_note(prs.slides[idx], rec, feeder, notice,
-                                      images, img=img, img_after=aft)
+                                      images, img=img, img_after=aft,
+                                      maps_link=maps_link)
             photos_ok += before
             after_ok += after
             if progress_cb:
@@ -626,7 +632,7 @@ def _build_one(out_path: str, part_records: List[Dict[str, str]], feeder: str,
 
 
 def build_report(excel_path: str, out_path: str, notice: str = "",
-                 progress_cb=None) -> Dict[str, Any]:
+                 progress_cb=None, maps_link: bool = True) -> Dict[str, Any]:
     records, mapping, headers = read_excel(excel_path)
     if not records:
         raise ValueError("لم يُعثر على أي ملاحظات في ملف الإكسل.")
@@ -648,7 +654,8 @@ def build_report(excel_path: str, out_path: str, notice: str = "",
     # لستمئة ملاحظة — دون سقف الخادم (512) بهامش مريح.
     try:
         st = _build_one(out_path, records, feeder, notice, counts, totals,
-                        images, (1, 1), progress_cb, 0, len(records))
+                        images, (1, 1), progress_cb, 0, len(records),
+                        maps_link=maps_link)
     finally:
         images.close()
     gc.collect()

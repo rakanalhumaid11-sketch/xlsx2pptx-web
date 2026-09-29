@@ -687,6 +687,31 @@ def set_hyperlink(shape, url: str):
                 pass
 
 
+def clear_hyperlink(shape):
+    """يزيل أي رابط عن نص الشكل وعن الشكل نفسه.
+
+    ضروري لا تجميلي: شكل الإحداثيات في القالب يحمل رابطًا ثابتًا من التقرير
+    الذي بُني منه القالب، فكل شريحة منسوخة ترثه. فإن لم نضع رابطًا جديدًا
+    ولم نُزله، فتح الضغط على الإحداثيات موقعًا آخر لا علاقة له بالملاحظة."""
+    try:
+        tf = shape.text_frame
+    except Exception:
+        tf = None
+    if tf is not None:
+        for p in tf.paragraphs:
+            for r in p.runs:
+                try:
+                    if r.hyperlink.address:
+                        r.hyperlink.address = None
+                except Exception:
+                    pass
+    try:
+        if shape.click_action.hyperlink.address:
+            shape.click_action.hyperlink.address = None
+    except Exception:
+        pass
+
+
 def maps_url(lat, lon) -> Optional[str]:
     try:
         lat_f = float(str(lat).strip())

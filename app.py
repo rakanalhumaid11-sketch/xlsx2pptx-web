@@ -30,6 +30,7 @@ import builder
 import matcher
 import photoreview
 import sorter
+import summary
 import zones
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1320,6 +1321,123 @@ def photos_download(job_id):
     stem = state.get("stem") or "الملاحظات"
     return send_file(state["output_path"], as_attachment=True,
                      download_name=f"{stem} - صور مختارة.xlsx")
+
+# --------------------------------------------------------------------------
+# ملخص الأداء: ملفات مغذيات كثيرة ← ورقة «الملخص»
+# --------------------------------------------------------------------------
+
+def _summary_state(job_id):
+    d = job_dir(job_id)
+    state = read_state(d)
+    if state.get("kind") != "summary":
+        abort(404)
+    return d, state
+
+
+def _save_many(files, d: str, prefix: str):
+    out = []
+    for i, f in enumerate(files):
+        p = os.path.join(d, "%s%02d.xlsx" % (prefix, i))
+        f.save(p)
+        out.append((p, os.path.basename(f.filename)))
+    return out
+
+
+@app.route("/summary", methods=["GET"])
+def summary_form():
+    cleanup_old_jobs()
+    return render_template("summary_new.html")
+
+
+@app.route("/summary/start", methods=["POST"])
+def summary_start():
+    basics = [f for f in request.files.getlist("basic_files") if f and f.filename]
+    colors = [f for f in request.files.getlist("colored_files") if f and f.filename]
+
+    def fail(msg):
+        return render_template("summary_new.html", error=msg), 400
+
+    if not basics:
+        return fail("اختر الملفات الأساسية أولًا — منها يُحسب الإنجاز وجدول D1.")
+    bad = [f.filename for f in basics + colors
+           if not f.filename.lower().endswith((".xlsx", ".xlsm"))]
+    if bad:
+        return fail(f"الملفات يجب أن تكون ‎.xlsx‎ — تحقّق من: {bad[0]}")
+
+    job_id, d = new_job_dir()
+    b = _save_many(basics, d, "basic")
+    c = _save_many(colors, d, "colored")
+    try:
+        with heavy_lock():
+            an = summary.analyze(b, c)
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(d, ignore_errors=True)
+        return fail(f"تعذّرت قراءة الملفات: {exc}")
+    # الملفات لم تعد لازمة: كل ما يحتاجه الملخص صار في التحليل
+    for p, _n in b + c:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    with open(os.path.join(d, "analysis.pkl"), "wb") as fh:
+        pickle.dump(an, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    write_state(d, {"job_id": job_id, "kind": "summary", "created_at": time.time()})
+    return redirect(url_for("summary_rules", job_id=job_id))
+
+
+@app.route("/job/<job_id>/summary")
+def summary_rules(job_id):
+    d, state = _summary_state(job_id)
+    an = _load_analysis(d)
+    return render_template("summary_rules.html", job_id=job_id, an=an,
+                           colors=summary.COLOR_COLS,
+                           date_text=summary.date_label(an["dates"]),
+                           short=summary.short_name, error=request.args.get("e"))
+
+
+@app.route("/job/<job_id>/summary/build", methods=["POST"])
+def summary_build(job_id):
+    d, state = _summary_state(job_id)
+    an = _load_analysis(d)
+    choices = {}
+    for i, f in enumerate(an["feeders"]):
+        known = {n["num"] for n in f["notices"]}
+        choices[f["code"]] = {
+            "name": (request.form.get("name_%d" % i) or "").strip()[:80],
+            "end": (request.form.get("end_%d" % i) or "").strip()[:30],
+            "contractor": request.form.get("contractor_%d" % i) or f["main"],
+            # المؤشَّر فقط، ومن إشعارات الملف نفسه لا غير
+            "ticks": [t for t in request.form.getlist("tick_%d" % i) if t in known],
+        }
+    out = os.path.join(d, "summary.xlsx")
+    try:
+        with heavy_lock():
+            res = summary.write_output(an, choices, out)
+    except Exception as exc:  # noqa: BLE001
+        return redirect(url_for("summary_rules", job_id=job_id, e=f"تعذّر بناء الملخص: {exc}"))
+    state["result"] = res
+    state["output_path"] = out
+    write_state(d, state)
+    return redirect(url_for("summary_result", job_id=job_id))
+
+
+@app.route("/job/<job_id>/summary/result")
+def summary_result(job_id):
+    _d, state = _summary_state(job_id)
+    if not state.get("result"):
+        return redirect(url_for("summary_rules", job_id=job_id))
+    return render_template("summary_result.html", job_id=job_id, r=state["result"],
+                           colors=summary.COLOR_COLS)
+
+
+@app.route("/job/<job_id>/summary/download")
+def summary_download(job_id):
+    _d, state = _summary_state(job_id)
+    if not state.get("output_path") or not os.path.exists(state["output_path"]):
+        abort(404)
+    date = (state.get("result") or {}).get("date", "")
+    return send_file(state["output_path"], as_attachment=True,
+                     download_name="ملخص الملاحظات وحالة الإنجاز %s.xlsx" % date.split(" ")[0])
 
 
 if __name__ == "__main__":

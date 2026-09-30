@@ -159,14 +159,17 @@ class Styles:
 
     def xf(self, font: int = 0, fill: int = 0, border: int = 0, numfmt: int = 0,
            halign: str = "", valign: str = "center", wrap: bool = False,
-           indent: int = 0) -> int:
+           indent: int = 0, rtl: bool = False) -> int:
+        """`rtl` يثبّت اتجاه القراءة من اليمين: نص عربي فيه «D1» أو رقم يقلبه
+        بعض البرامج إذا تُرك الاتجاه لتخمين السياق."""
         align = ""
-        if halign or valign or wrap or indent:
-            align = ('<alignment%s%s%s%s/>' % (
+        if halign or valign or wrap or indent or rtl:
+            align = ('<alignment%s%s%s%s%s/>' % (
                 ' horizontal="%s"' % halign if halign else "",
                 ' vertical="%s"' % valign if valign else "",
                 ' wrapText="1"' if wrap else "",
-                ' indent="%d"' % indent if indent else ""))
+                ' indent="%d"' % indent if indent else "",
+                ' readingOrder="2"' if rtl else ""))
         self.added["xf"].append(
             '<xf numFmtId="%d" fontId="%d" fillId="%d" borderId="%d" xfId="0"'
             ' applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"'
@@ -267,6 +270,7 @@ class SheetBuilder:
         self.widths: Dict[int, float] = {}
         self.heights: Dict[int, float] = {}
         self.databars: List[Tuple[str, str]] = []
+        self.drawing_rid = ""          # يُضبط عند إرفاق رسم بياني بالورقة
 
     def set(self, row: int, col: int, value: Any, style: Optional[int] = None,
             formula: str = ""):
@@ -345,7 +349,7 @@ class SheetBuilder:
             '%s<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5"'
             ' header="0.3" footer="0.3"/>'
             '<pageSetup orientation="%s" fitToWidth="1" fitToHeight="0"/>'
-            '</worksheet>' % (
+            '%s</worksheet>' % (
                 MAIN_NS, REL_NS,
                 # fitToWidth لا يعمل إلا مع pageSetUpPr، وبدونه تنقسم الورقة صفحتين
                 "<sheetPr>%s<pageSetUpPr fitToPage=\"1\"/></sheetPr>" % (
@@ -356,7 +360,8 @@ class SheetBuilder:
                 ' tabSelected="1"' if self.selected else "",
                 cols_xml, "".join(body), merges, cf,
                 '<printOptions horizontalCentered="1"/>' if self.centered else "",
-                "landscape" if self.landscape else "portrait"))
+                "landscape" if self.landscape else "portrait",
+                '<drawing r:id="%s"/>' % self.drawing_rid if self.drawing_rid else ""))
 
 
 # ------------------------------------------------------------------ تعديل ورقة
@@ -739,4 +744,194 @@ _MIN_STYLES = (
     '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
     '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+    '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
     "</styleSheet>" % MAIN_NS)
+
+
+# ------------------------------------------------------------ مصنّف جديد
+
+C_NS = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+XDR_NS = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+
+
+def _txpr(size: int = 1000, bold: bool = False, color: str = "404040") -> str:
+    return ('<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="%d" b="%d">'
+            '<a:solidFill><a:srgbClr val="%s"/></a:solidFill><a:latin typeface="Arial"/>'
+            '<a:cs typeface="Arial"/></a:defRPr></a:pPr><a:endParaRPr lang="ar-SA"/></a:p>'
+            '</c:txPr>' % (size, 1 if bold else 0, color))
+
+
+def stacked_bar_chart(title: str, sheet: str, categories: List[str], cat_ref: str,
+                      series: List[Dict[str, Any]]) -> str:
+    """رسم أشرطة أفقية متراكبة — بالقيم المحسوبة مخزّنة فيه كي يظهر فورًا.
+
+    series: [{"name", "name_ref", "ref", "values", "color"}]، والمراجع بصيغة
+    $F$6:$F$10 دون اسم الورقة. اسم الورقة يُكتب بين علامتي اقتباس دائمًا
+    لأن الاسم العربي قد يحوي مسافة أو شرطة."""
+    q = "'%s'" % sheet.replace("'", "''")
+
+    def str_cache(items: List[str]) -> str:
+        return '<c:strCache><c:ptCount val="%d"/>%s</c:strCache>' % (
+            len(items), "".join('<c:pt idx="%d"><c:v>%s</c:v></c:pt>' % (i, esc(v))
+                                for i, v in enumerate(items)))
+
+    def num_cache(vals: List[float]) -> str:
+        return ('<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="%d"/>%s'
+                '</c:numCache>' % (len(vals), "".join(
+                    '<c:pt idx="%d"><c:v>%s</c:v></c:pt>' % (i, v) for i, v in enumerate(vals))))
+
+    sers = []
+    for i, se in enumerate(series):
+        sers.append(
+            '<c:ser><c:idx val="%d"/><c:order val="%d"/>'
+            '<c:tx><c:strRef><c:f>%s!%s</c:f>%s</c:strRef></c:tx>'
+            '<c:spPr><a:solidFill><a:srgbClr val="%s"/></a:solidFill></c:spPr>'
+            '<c:invertIfNegative val="0"/>'
+            '<c:cat><c:strRef><c:f>%s!%s</c:f>%s</c:strRef></c:cat>'
+            '<c:val><c:numRef><c:f>%s!%s</c:f>%s</c:numRef></c:val></c:ser>' % (
+                i, i, q, se["name_ref"], str_cache([se["name"]]), se["color"],
+                q, cat_ref, str_cache(categories), q, se["ref"], num_cache(se["values"])))
+    grid = '<c:spPr><a:ln w="9360"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr>'
+    axis_ln = '<c:spPr><a:ln w="9360"><a:solidFill><a:srgbClr val="878787"/></a:solidFill></a:ln></c:spPr>'
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<c:chartSpace xmlns:c="%s" xmlns:a="%s" xmlns:r="%s">'
+        '<c:date1904 val="0"/><c:lang val="ar-SA"/><c:roundedCorners val="0"/>'
+        '<c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr>'
+        '<a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="1F3864"/></a:solidFill>'
+        '<a:latin typeface="Arial"/><a:cs typeface="Arial"/></a:defRPr></a:pPr>'
+        '<a:r><a:rPr lang="ar-SA" sz="1600" b="1"><a:solidFill><a:srgbClr val="1F3864"/>'
+        '</a:solidFill><a:latin typeface="Arial"/><a:cs typeface="Arial"/></a:rPr>'
+        '<a:t>%s</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>'
+        '<c:autoTitleDeleted val="0"/><c:plotArea><c:layout/>'
+        '<c:barChart><c:barDir val="bar"/><c:grouping val="stacked"/><c:varyColors val="0"/>'
+        '%s<c:gapWidth val="80"/><c:overlap val="100"/>'
+        '<c:axId val="31236366"/><c:axId val="63572213"/></c:barChart>'
+        '<c:catAx><c:axId val="31236366"/><c:scaling><c:orientation val="minMax"/></c:scaling>'
+        '<c:delete val="0"/><c:axPos val="l"/><c:numFmt formatCode="General" sourceLinked="1"/>'
+        '<c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>'
+        '%s%s<c:crossAx val="63572213"/><c:crosses val="autoZero"/><c:auto val="1"/>'
+        '<c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>'
+        '<c:valAx><c:axId val="63572213"/><c:scaling><c:orientation val="minMax"/></c:scaling>'
+        '<c:delete val="0"/><c:axPos val="b"/><c:majorGridlines>%s</c:majorGridlines>'
+        '<c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/>'
+        '<c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>%s%s'
+        '<c:crossAx val="31236366"/><c:crosses val="autoZero"/><c:crossBetween val="between"/>'
+        '</c:valAx><c:spPr><a:noFill/></c:spPr></c:plotArea>'
+        '<c:legend><c:legendPos val="b"/><c:overlay val="0"/>%s</c:legend>'
+        '<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>'
+        '<c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>'
+        '<a:ln w="9360"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr>'
+        '</c:chartSpace>' % (
+            C_NS, A_NS, REL_NS, esc(title), "".join(sers),
+            axis_ln, _txpr(1000, True, "1F3864"), grid, axis_ln, _txpr(900),
+            _txpr(1000)))
+
+
+def _drawing_xml(anchors: List[Tuple[int, int, int, int]]) -> str:
+    """مرسى لكل رسم: (عمود البداية، صفها، عمود النهاية، صفها) بترقيم يبدأ من 0."""
+    parts = []
+    for i, (c1, r1, c2, r2) in enumerate(anchors):
+        parts.append(
+            '<xdr:twoCellAnchor editAs="oneCell">'
+            '<xdr:from><xdr:col>%d</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>%d</xdr:row>'
+            '<xdr:rowOff>0</xdr:rowOff></xdr:from>'
+            '<xdr:to><xdr:col>%d</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>%d</xdr:row>'
+            '<xdr:rowOff>0</xdr:rowOff></xdr:to>'
+            '<xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="%d" name="Chart %d"/>'
+            '<xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/>'
+            '<a:ext cx="0" cy="0"/></xdr:xfrm><a:graphic>'
+            '<a:graphicData uri="%s"><c:chart xmlns:c="%s" r:id="rId%d"/></a:graphicData>'
+            '</a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>'
+            % (c1, r1, c2, r2, i + 2, i + 1, C_NS, C_NS, i + 1))
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+            '<xdr:wsDr xmlns:xdr="%s" xmlns:a="%s" xmlns:r="%s">%s</xdr:wsDr>'
+            % (XDR_NS, A_NS, REL_NS, "".join(parts)))
+
+
+def write_workbook(dst_path: str, sheets: List[Tuple[str, "SheetBuilder"]],
+                   styles: "Styles",
+                   charts: Optional[Dict[int, List[Tuple[str, Tuple[int, int, int, int]]]]] = None
+                   ) -> None:
+    """يكتب ملف إكسل جديدًا من أوراق مبنية بـ SheetBuilder.
+
+    نكتب الحزمة بأيدينا بدل openpyxl لسبب واحد: الصيغ هنا تُكتب ومعها
+    قيمتها المحسوبة. ملف openpyxl يصل بصيغ بلا قيم، فيفتحه عارض الجوال
+    (معاينة واتساب مثلًا) بخلايا فارغة لأنه لا يحسب — والملخص يُرسل غالبًا
+    بهذه الطريقة. و fullCalcOnLoad يجعل إكسل يعيد الحساب عند الفتح."""
+    charts = charts or {}
+    ct_sheets = "".join(
+        '<Override PartName="/xl/worksheets/sheet%d.xml" ContentType="application/'
+        'vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' % (i + 1)
+        for i in range(len(sheets)))
+    # ترقيم الرسومات عبر الأوراق: drawingN لكل ورقة فيها رسم، و chartN لكل رسم
+    drawing_of: Dict[int, int] = {}
+    chart_parts: List[Tuple[int, int, str]] = []        # (ورقة، رقم الرسم، XML)
+    for si in sorted(charts):
+        if not charts[si]:
+            continue
+        drawing_of[si] = len(drawing_of) + 1
+        for xml, _anchor in charts[si]:
+            chart_parts.append((si, len(chart_parts) + 1, xml))
+    for si, dn in drawing_of.items():
+        ct_sheets += ('<Override PartName="/xl/drawings/drawing%d.xml" ContentType="application/'
+                      'vnd.openxmlformats-officedocument.drawing+xml"/>' % dn)
+        sheets[si][1].drawing_rid = "rId1"
+    for _si, cn, _x in chart_parts:
+        ct_sheets += ('<Override PartName="/xl/charts/chart%d.xml" ContentType="application/'
+                      'vnd.openxmlformats-officedocument.drawingml.chart+xml"/>' % cn)
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/'
+        'vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/styles.xml" ContentType="application/'
+        'vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+        '%s</Types>' % ct_sheets)
+    root_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/'
+        '2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+    wb_sheets = "".join('<sheet name="%s" sheetId="%d" r:id="rId%d"/>' % (esc(n), i + 1, i + 1)
+                        for i, (n, _sb) in enumerate(sheets))
+    workbook = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<workbook xmlns="%s" xmlns:r="%s"><bookViews><workbookView activeTab="0"/>'
+        '</bookViews><sheets>%s</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/>'
+        '</workbook>' % (MAIN_NS, REL_NS, wb_sheets))
+    wb_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '%s<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/'
+        '2006/relationships/styles" Target="styles.xml"/></Relationships>' % (
+            "".join('<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/'
+                    'officeDocument/2006/relationships/worksheet" Target="worksheets/'
+                    'sheet%d.xml"/>' % (i + 1, i + 1) for i in range(len(sheets))),
+            len(sheets) + 1))
+    with zipfile.ZipFile(dst_path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", content_types)
+        z.writestr("_rels/.rels", root_rels)
+        z.writestr("xl/workbook.xml", workbook)
+        z.writestr("xl/_rels/workbook.xml.rels", wb_rels)
+        z.writestr("xl/styles.xml", styles.render())
+        for i, (_n, sb) in enumerate(sheets):
+            z.writestr("xl/worksheets/sheet%d.xml" % (i + 1), sb.to_xml())
+        rel_t = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/"
+        rels_head = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+                     '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">')
+        for si, dn in drawing_of.items():
+            mine = [(cn, x) for s_i, cn, x in chart_parts if s_i == si]
+            z.writestr("xl/worksheets/_rels/sheet%d.xml.rels" % (si + 1),
+                       rels_head + '<Relationship Id="rId1" Type="%sdrawing" '
+                       'Target="../drawings/drawing%d.xml"/></Relationships>' % (rel_t, dn))
+            z.writestr("xl/drawings/drawing%d.xml" % dn,
+                       _drawing_xml([a for _x, a in charts[si]]))
+            z.writestr("xl/drawings/_rels/drawing%d.xml.rels" % dn, rels_head + "".join(
+                '<Relationship Id="rId%d" Type="%schart" Target="../charts/chart%d.xml"/>'
+                % (k + 1, rel_t, cn) for k, (cn, _x) in enumerate(mine)) + "</Relationships>")
+            for cn, x in mine:
+                z.writestr("xl/charts/chart%d.xml" % cn, x)

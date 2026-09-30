@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap-wide">
+
+  <div class="page-head">
+    <h1>الملخص جاهز</h1>
+    <p>ملخص الملاحظات وحالة الإنجاز حسب المغذي — بيانات مصدّرة بتاريخ {% for d in r.date.split(' إلى ') %}<span dir="ltr">{{ d }}</span>{% if not loop.last %} إلى {% endif %}{% endfor %}.</p>
+  </div>
+
+  <a class="btn" href="{{ url_for('summary_download', job_id=job_id) }}">تحميل ملف الملخص</a>
+  <span class="hint">ورقة واحدة بصفحة واحدة، جاهزة للحفظ PDF، وفيها رسم «حالة الإنجاز حسب المغذي». هذه معاينة لما فيها:</span>
+
+  {% macro head(cols) %}
+  <thead><tr><th>المغذي</th><th>اسم المقاول</th>{% for c in cols %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+  {% endmacro %}
+
+  <h2 class="sec-title">أولاً: حالة الإنجاز حسب المغذي</h2>
+  <table class="ledger sm-tab">
+    {{ head(["إجمالي الملاحظات", "تم الإقفال", "مسترجع", "بانتظار المعالجة", "نسبة الإنجاز"]) }}
+    <tbody>
+      {% set T = namespace(t=0, c=0, r=0, p=0) %}
+      {% for x in r.rows %}{% set a = x.t1 %}
+      {% set T.t = T.t + a.total %}{% set T.c = T.c + a.closed %}{% set T.r = T.r + a.returned %}{% set T.p = T.p + a.pending %}
+      <tr><td dir="ltr"><b>{{ x.code }}</b></td><td class="nm">{{ x.name }}</td><td><b>{{ a.total }}</b></td>
+        <td class="ok">{{ a.closed }}</td><td class="warn">{{ a.returned }}</td><td>{{ a.pending }}</td>
+        <td><b>{{ (100 * a.closed / a.total)|round|int if a.total else 0 }}%</b></td></tr>
+      {% endfor %}
+      <tr class="sum"><td>الإجمالي</td><td></td><td><b>{{ T.t }}</b></td><td class="ok">{{ T.c }}</td>
+        <td class="warn">{{ T.r }}</td><td>{{ T.p }}</td><td><b>{{ (100 * T.c / T.t)|round|int if T.t else 0 }}%</b></td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="sec-title">ثانياً: الإنجاز حسب إشعار D1</h2>
+  <table class="ledger sm-tab">
+    {{ head(["إجمالي الملاحظات", "تم الإقفال", "مسترجع", "بانتظار المعالجة", "نسبة الإنجاز"]) }}
+    <tbody>
+      {% set D = namespace(t=0, c=0, r=0) %}
+      {% for x in r.rows %}{% set a = x.t2 %}
+      {% set D.t = D.t + a.total %}{% set D.c = D.c + a.closed %}{% set D.r = D.r + a.returned %}
+      <tr><td dir="ltr"><b>{{ x.code }}</b></td><td class="nm">{{ x.name }}</td><td><b>{{ a.total }}</b></td>
+        <td class="ok">{{ a.closed }}</td><td class="warn">{{ a.returned }}</td><td>{{ a.total - a.closed - a.returned }}</td>
+        <td><b>{{ (100 * a.closed / a.total)|round|int if a.total else 0 }}%</b></td></tr>
+      {% endfor %}
+      <tr class="sum"><td>الإجمالي</td><td></td><td><b>{{ D.t }}</b></td><td class="ok">{{ D.c }}</td>
+        <td class="warn">{{ D.r }}</td><td>{{ D.t - D.c - D.r }}</td><td><b>{{ (100 * D.c / D.t)|round|int if D.t else 0 }}%</b></td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="sec-title">ثالثاً: تصنيف الملاحظات حسب اللون</h2>
+  <table class="ledger sm-tab">
+    <thead><tr><th>المغذي</th><th>اسم المقاول</th>
+      {% for key, label, bg, fg in colors %}<th style="background:#{{ bg }};color:#{{ fg }}">{{ label }}</th>{% endfor %}
+      <th>الإجمالي</th><th>الانتهاء من الصيانة</th></tr></thead>
+    <tbody>
+      {% for x in r.rows %}
+      <tr><td dir="ltr"><b>{{ x.code }}</b></td><td class="nm">{{ x.name }}</td>
+        {% if x.t3 %}
+          {% for key, label, bg, fg in colors %}<td>{{ x.t3[key] }}</td>{% endfor %}
+          <td><b>{{ x.t3.values()|sum }}</b></td>
+        {% else %}
+          <td colspan="5" class="sm-dim">لم يُرفع ملف ملوّن لهذا المغذي</td>
+        {% endif %}
+        <td>{{ x.end or "لم يتم التحديد" }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p style="margin-top: 26px">
+    <a class="back-link" href="{{ url_for('summary_rules', job_id=job_id) }}">رجوع لتعديل الأسماء والإشعارات</a>
+  </p>
+
+</div>
+{% endblock %}

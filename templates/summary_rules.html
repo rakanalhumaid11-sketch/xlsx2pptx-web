@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap-wide">
+
+  <div class="page-head">
+    <h1>ملخص الأداء</h1>
+    <p>{{ an.feeders|length }} مغذٍّ، مصدّرة بتاريخ {% for d in date_text.split(' إلى ') %}<span dir="ltr">{{ d }}</span>{% if not loop.last %} إلى {% endif %}{% endfor %}. اكتب اسم المقاول كما تريده في الجدول، واختر إشعارات D1 التي تدخل الجدول الثاني.</p>
+  </div>
+
+  {% if error %}<div class="errors">{{ error }}</div>{% endif %}
+  {% for w in an.warnings %}<div class="errors">{{ w }}</div>{% endfor %}
+
+  <form method="post" action="{{ url_for('summary_build', job_id=job_id) }}" id="smForm">
+
+    {% for f in an.feeders %}
+    {% set i = loop.index0 %}
+    <section class="sm-card" data-i="{{ i }}" data-code="{{ f.code }}">
+      <div class="sm-head">
+        <b class="sm-code" dir="ltr">{{ f.code }}</b>
+        {% if f.export %}<span class="sm-dim">تصدير <span dir="ltr">{{ f.export }}</span></span>{% endif %}
+        <span class="sm-dim sm-file" title="{{ f.name }}">{{ f.name }}</span>
+      </div>
+
+      <div class="sm-stats">
+        <span><b>{{ f.total }}</b> إجمالي</span>
+        <span class="ok"><b>{{ f.closed }}</b> تم الإقفال</span>
+        <span class="bad"><b>{{ f.returned }}</b> مسترجع</span>
+        <span><b>{{ f.pending }}</b> بانتظار المعالجة</span>
+      </div>
+
+      <div class="sm-grid">
+        <label class="sm-field">
+          <span>مقاول الجدول</span>
+          <select name="contractor_{{ i }}" class="sm-con">
+            {% for c, n in f.contractors %}
+            <option value="{{ c }}" {% if c == f.main %}selected{% endif %}>{{ c }} ({{ n }})</option>
+            {% endfor %}
+            {% if not f.contractors %}<option value="">— لا مقاول على إشعار D1 —</option>{% endif %}
+          </select>
+        </label>
+        <label class="sm-field">
+          <span>الاسم في الجدول</span>
+          <input type="text" name="name_{{ i }}" class="sm-name" maxlength="80"
+                 value="{{ short(f.main) }}" placeholder="مثل: سنابل المشعان">
+        </label>
+        <label class="sm-field">
+          <span>الانتهاء من الصيانة <em>— اختياري</em></span>
+          <input type="date" name="end_{{ i }}" class="sm-end">
+        </label>
+      </div>
+
+      <div class="sm-notices">
+        <span class="sm-sub">إشعارات D1 — المؤشَّر فقط يدخل الجدول الثاني</span>
+        {% for n in f.notices %}
+        <label class="sm-n {{ 'phone' if n.phone_like else '' }}">
+          <input type="checkbox" name="tick_{{ i }}" value="{{ n.num }}"
+                 data-cons="{{ n.contractors|map('first')|list|tojson|forceescape }}"
+                 data-phone="{{ 1 if n.phone_like else 0 }}"
+                 data-t="{{ n.total }}" data-c="{{ n.closed }}" data-r="{{ n.returned }}"
+                 {% if n.num in f.ticks %}checked{% endif %}>
+          <b dir="ltr">{{ n.num }}</b>
+          <span class="sm-cons">{% for c, k in n.contractors %}{{ c }} {{ k }}{% if not loop.last %}، {% endif %}{% endfor %}</span>
+          <span class="sm-cnt">{{ n.total }} ملاحظة · {{ n.closed }} مقفلة · {{ n.returned }} مسترجعة</span>
+          {% if n.phone_like %}<span class="sm-warn">⚠ يبدأ بـ 05 — يشبه رقم جوال لا إشعار</span>{% endif %}
+        </label>
+        {% endfor %}
+        {% if not f.notices %}<span class="sm-dim">لا توجد ملاحظة عليها إشعار D1 في هذا الملف.</span>{% endif %}
+        <div class="sm-d1">
+          في الجدول الثاني: <b class="d1t">0</b> إجمالي · <b class="d1c">0</b> تم الإقفال ·
+          <b class="d1r">0</b> مسترجع · <b class="d1p">0</b> بانتظار المعالجة
+        </div>
+      </div>
+
+      <div class="sm-color">
+        {% if f.colored %}
+        <span class="sm-sub">الملف الملوّن: {{ f.colored.name }}</span>
+        {% for key, label, bg, fg in colors %}
+        <span class="sm-chip" style="background:#{{ bg }};color:#{{ fg }}">{{ label }} {{ f.colored.counts[key] }}</span>
+        {% endfor %}
+        {% if f.colored.uncolored %}<span class="sm-dim">بلا لون {{ f.colored.uncolored }}</span>{% endif %}
+        {% if f.colored.other %}<span class="sm-dim">ألوان خارج الأربعة لا تُحسب {{ f.colored.other }}</span>{% endif %}
+        {% else %}
+        <span class="sm-warn">لم يُرفع ملف ملوّن لهذا المغذي — يُكتب ذلك في الجدول الثالث بدل الأرقام.</span>
+        {% endif %}
+      </div>
+    </section>
+    {% endfor %}
+
+    <button class="btn" type="submit">أنشئ الملخص</button>
+    <span class="hint">
+      الاسم وتاريخ الانتهاء يحفظهما المتصفح لكل مغذٍّ، فيأتيان جاهزين في المرة القادمة.
+    </span>
+  </form>
+
+</div>
+
+<script>
+(function () {
+  function shortName(s) {
+    return (s || "").replace(/^\s*(صيانة\s+عامة|ملاحظات\s+أشجار)\s*[-–—]\s*/, "")
+                    .replace(/^\s*مقاول\s+/, "").trim() || s;
+  }
+  function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+  document.querySelectorAll(".sm-card").forEach(function (card) {
+    var code = card.dataset.code;
+    var con = card.querySelector(".sm-con");
+    var name = card.querySelector(".sm-name");
+    var end = card.querySelector(".sm-end");
+    var boxes = Array.prototype.slice.call(card.querySelectorAll('.sm-n input[type="checkbox"]'));
+    var ticksTouched = false, nameTouched = false;
+
+    function recount() {
+      var t = 0, c = 0, r = 0;
+      boxes.forEach(function (b) {
+        if (b.checked) { t += +b.dataset.t; c += +b.dataset.c; r += +b.dataset.r; }
+        b.closest(".sm-n").classList.toggle("on", b.checked);
+      });
+      card.querySelector(".d1t").textContent = t;
+      card.querySelector(".d1c").textContent = c;
+      card.querySelector(".d1r").textContent = r;
+      card.querySelector(".d1p").textContent = t - c - r;
+    }
+
+    // الاسم والتاريخ المحفوظان من المرة السابقة لهذا المغذي
+    var sn = load("sm_name_" + code), se = load("sm_end_" + code);
+    if (sn) { name.value = sn; nameTouched = true; }
+    if (se) end.value = se;
+
+    name.addEventListener("input", function () { nameTouched = true; store("sm_name_" + code, name.value); });
+    end.addEventListener("change", function () { store("sm_end_" + code, end.value); });
+
+    // تغيير مقاول الجدول يعيد الاختيار الأولي للإشعارات، ما لم تلمسها بيدك
+    con.addEventListener("change", function () {
+      if (!ticksTouched) {
+        boxes.forEach(function (b) {
+          var cons = JSON.parse(b.dataset.cons || "[]");
+          b.checked = b.dataset.phone !== "1" && cons.indexOf(con.value) >= 0;
+        });
+      }
+      if (!nameTouched) name.value = shortName(con.value);
+      recount();
+    });
+    boxes.forEach(function (b) {
+      b.addEventListener("change", function () { ticksTouched = true; recount(); });
+    });
+    recount();
+  });
+})();
+</script>
+{% endblock %}

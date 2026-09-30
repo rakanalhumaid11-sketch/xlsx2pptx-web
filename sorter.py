@@ -285,19 +285,32 @@ def analyze(path: str) -> Dict[str, Any]:
     if not rows_raw:
         raise ValueError("الورقة فارغة.")
 
-    header_row = rows_raw[0][0]
-    headers: Dict[str, str] = {}
-    for ca, cb in _CELL_RE.findall(rows_raw[0][1]):
-        a = _attrs(ca)
-        if "r" in a:
-            headers[col_letters(a["r"])] = value(a, cb)
+    # الترويسة ليست دائمًا الصف الأول: تصدير النظام يضع فوقها ثلاثة أسطر
+    # (العنوان، تاريخ التصدير، الجزء) فتكون في الصف الخامس. نبحث عنها في أول
+    # خمسة عشر صفًا بعمود نعرفه، وإلا عُدّ الصف الأول ترويسة كما كان
+    def row_headers(body: str) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        for ca, cb in _CELL_RE.findall(body):
+            a = _attrs(ca)
+            if "r" in a:
+                out[col_letters(a["r"])] = value(a, cb)
+        return out
+
+    hdr_i = 0
+    for i, (_rn, body) in enumerate(rows_raw[:15]):
+        h = row_headers(body)
+        if _find_col(h, FEEDER_ALIASES) or _find_col(h, ["رقم الملاحظة", "رقم الملاحظه"]):
+            hdr_i = i
+            break
+    header_row = rows_raw[hdr_i][0]
+    headers = row_headers(rows_raw[hdr_i][1])
 
     c_feeder = _find_col(headers, FEEDER_ALIASES)
     c_type = _find_col(headers, TYPE_ALIASES)
     c_d1 = _find_col(headers, D1_ALIASES)
 
     recs: List[Dict[str, Any]] = []
-    for rn, body in rows_raw[1:]:
+    for rn, body in rows_raw[hdr_i + 1:]:
         cells: Dict[str, Tuple[Dict[str, str], str]] = {}
         colors: Dict[str, int] = {}
         any_value = False
@@ -448,15 +461,23 @@ def write_sorted(src: str, dst: str, sheet_path: str, header_row: int,
                     "الورقة فيها خلايا مدمجة داخل البيانات، والفرز يفسدها. "
                     "أزل الدمج من الملف ثم أعد المحاولة.")
 
+        # ما فوق الترويسة (عنوان التصدير وتاريخه) يبقى كما هو في موضعه،
+        # والترويسة في صفها، والبيانات تبدأ تحتها مباشرة
         new_of: Dict[int, int] = {}
-        out_rows: List[str] = [_renumber(rows[header_row][0], rows[header_row][1], 1)]
-        new_of[header_row] = 1
-        for i, rn in enumerate(order, start=2):
+        out_rows: List[str] = []
+        for rn in sorted(r for r in rows if r < header_row):
+            new_of[rn] = rn
+            out_rows.append(_renumber(rows[rn][0], rows[rn][1], rn))
+        out_rows.append(_renumber(rows[header_row][0], rows[header_row][1], header_row))
+        new_of[header_row] = header_row
+        nxt = header_row
+        for rn in order:
             if rn not in rows:
                 continue
-            new_of[rn] = i
-            out_rows.append(_renumber(rows[rn][0], rows[rn][1], i))
-        last_row = len(out_rows)
+            nxt += 1
+            new_of[rn] = nxt
+            out_rows.append(_renumber(rows[rn][0], rows[rn][1], nxt))
+        last_row = nxt
 
         # نطاق الورقة وحدودها: dimension والتصفية التلقائية والنطاق المعرَّف
         dim_m = re.search(r'<dimension\b[^>]*ref="([^"]+)"', sheet)
@@ -477,8 +498,9 @@ def write_sorted(src: str, dst: str, sheet_path: str, header_row: int,
 
         head = re.sub(r'(<dimension\b[^>]*ref=")[^"]+(")',
                       lambda m: m.group(1) + new_ref + m.group(2), head)
-        after = re.sub(r'(<autoFilter\b[^>]*ref=")[^"]+(")',
-                       lambda m: m.group(1) + new_ref + m.group(2), after)
+        # التصفية تبدأ من صف الترويسة لا من الصف الأول؛ نمدّ نهايتها فقط
+        after = re.sub(r'(<autoFilter\b[^>]*ref="[A-Z]+\d+:[A-Z]+)\d+(")',
+                       lambda m: m.group(1) + str(last_row) + m.group(2), after)
 
         # الروابط مربوطة برقم الصف لا بمحتواه: بلا إعادة ربط تهاجر صورة كل
         # ملاحظة إلى ملاحظة غيرها — وهذا أخطر ما في الفرز
@@ -534,7 +556,7 @@ def write_sorted(src: str, dst: str, sheet_path: str, header_row: int,
                 else:
                     out.writestr(n, z.read(n))
 
-    return {"rows": last_row - 1, "links_kept": kept_links,
+    return {"rows": last_row - header_row, "links_kept": kept_links,
             "links_dropped": dropped_links, "last_ref": new_ref}
 
 

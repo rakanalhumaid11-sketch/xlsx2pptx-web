@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+
+  <div class="page-head">
+    <h1>ملخص الأداء</h1>
+    <p>ارفع ملفات المغذيات مرة واحدة، فيخرج ملف «ملخص الملاحظات وحالة الإنجاز»: الإنجاز لكل مغذٍّ، والإنجاز على إشعار D1، وتصنيف الملاحظات حسب اللون.</p>
+  </div>
+
+  {% if error %}<div class="errors">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ url_for('summary_start') }}" enctype="multipart/form-data">
+
+    <label class="field-label">الملفات الأساسية <em>— كما تُصدَّر من النظام، بالمقفلة، ملف لكل مغذٍّ</em></label>
+    <label class="dropzone" id="bZone" for="basic_files">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M14 3v5h5"></path>
+        <path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"></path>
+      </svg>
+      <span class="dz-title" id="bTitle">اسحب الملفات الأساسية هنا</span>
+      <span class="dz-hint" id="bHint">منها الجدول الأول (الإنجاز) والثاني (إشعار D1)</span>
+    </label>
+    <input class="hidden-input" id="basic_files" type="file" name="basic_files"
+           accept=".xlsx,.xlsm" multiple required>
+    <p class="file-list" id="bList"></p>
+
+    <label class="field-label" style="margin-top: 26px">الملفات الملوّنة <em>— بعد الفرز والتلوين، اختيارية</em></label>
+    <label class="dropzone" id="cZone" for="colored_files">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 3a9 9 0 1 0 0 18c1 0 1.6-.8 1.6-1.6 0-.5-.2-.8-.5-1.1-.3-.3-.5-.7-.5-1.1 0-.9.7-1.6 1.6-1.6H16a5 5 0 0 0 5-5c0-4.1-4-7.6-9-7.6z"></path>
+        <circle cx="7.5" cy="10.5" r="1"></circle><circle cx="12" cy="7.5" r="1"></circle>
+        <circle cx="16.5" cy="10.5" r="1"></circle>
+      </svg>
+      <span class="dz-title" id="cTitle">اسحب الملفات الملوّنة هنا</span>
+      <span class="dz-hint" id="cHint">منها الجدول الثالث (الألوان) — تُربط بملفاتها الأساسية تلقائيًا من أرقام الملاحظات</span>
+    </label>
+    <input class="hidden-input" id="colored_files" type="file" name="colored_files"
+           accept=".xlsx,.xlsm" multiple>
+    <p class="file-list" id="cList"></p>
+
+    <button class="btn" type="submit">اقرأ الملفات</button>
+    <span class="hint">
+      لا يهم ترتيب الرفع ولا أسماء الملفات. الأحمر «تحتاج برنامج فصل»، والأخضر «قابلة للعمل»،
+      والأصفر «تحتاج مراجعة»، والأزرق «تحويل إلى قسم آخر».
+    </span>
+  </form>
+
+</div>
+
+<script>
+(function () {
+  function wire(inputId, zoneId, titleId, hintId, listId, label) {
+    var input = document.getElementById(inputId);
+    var zone = document.getElementById(zoneId);
+    var title = document.getElementById(titleId);
+    var list = document.getElementById(listId);
+    function show() {
+      var n = input.files ? input.files.length : 0;
+      if (!n) return;
+      zone.classList.add("filled");
+      title.textContent = n + " " + label;
+      list.textContent = Array.prototype.map.call(input.files, function (f) { return f.name; }).join(" · ");
+    }
+    input.addEventListener("change", show);
+    ["dragenter", "dragover"].forEach(function (e) {
+      zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.add("drag"); });
+    });
+    ["dragleave", "drop"].forEach(function (e) {
+      zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.remove("drag"); });
+    });
+    zone.addEventListener("drop", function (ev) {
+      if (ev.dataTransfer && ev.dataTransfer.files.length) { input.files = ev.dataTransfer.files; show(); }
+    });
+  }
+  wire("basic_files", "bZone", "bTitle", "bHint", "bList", "ملف أساسي");
+  wire("colored_files", "cZone", "cTitle", "cHint", "cList", "ملف ملوّن");
+})();
+</script>
+{% endblock %}

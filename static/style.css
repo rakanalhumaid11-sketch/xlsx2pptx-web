@@ -1049,3 +1049,7 @@ input[type="number"] { -moz-appearance: textfield; }
   .sm-grid { grid-template-columns: 1fr; }
   .sm-cnt { margin-inline-start: 0; }
 }
+.sm-grid { grid-template-columns: 1.6fr 1fr; }
+.sm-date { display: flex; gap: 8px; align-items: stretch; }
+.sm-date input { flex: 1; min-width: 0; text-align: left; }
+.sm-date .btn-small { margin: 0; min-height: 40px; white-space: nowrap; }

@@ -267,6 +267,13 @@ def analyze(basics: List[Tuple[str, str]], coloreds: List[Tuple[str, str]]) -> D
     return {"feeders": feeders, "warnings": warnings, "dates": dates}
 
 
+def today_riyadh() -> str:
+    """تاريخ اليوم بتوقيت السعودية (UTC+3 بلا توقيت صيفي). الخادم يعمل بتوقيت
+    غرينتش، فبعد التاسعة مساءً بتوقيتنا كان سيكتب تاريخ الأمس."""
+    tz = datetime.timezone(datetime.timedelta(hours=3))
+    return datetime.datetime.now(tz).date().isoformat()
+
+
 def date_label(dates: List[str]) -> str:
     if not dates:
         return datetime.date.today().isoformat()
@@ -337,7 +344,7 @@ def build_sheet(s: Dict[str, int], rows: List[Dict[str, Any]],
     sb.merge(1, 1, 1, last_col)
     sb.height(1, 34)
     # التاريخ آخر الجملة ومسبوق بكلمة: رقم في أول سطر عربي يقلبه محرّك الاتجاه
-    sb.set(2, 1, "بيانات الإنجاز حسب ملفات المغذيات المصدّرة بتاريخ %s" % date_text, s["sub"])
+    sb.set(2, 1, "بيانات الإنجاز حسب ملفات المغذيات بتاريخ %s" % date_text, s["sub"])
     sb.merge(2, 1, 2, last_col)
     sb.height(2, 18)
 
@@ -480,9 +487,10 @@ def compute_rows(an: Dict[str, Any], choices: Dict[str, Dict[str, Any]]) -> List
 
 
 def write_output(an: Dict[str, Any], choices: Dict[str, Dict[str, Any]],
-                 out_path: str) -> Dict[str, Any]:
+                 out_path: str, today: str = "") -> Dict[str, Any]:
     rows = compute_rows(an, choices)
-    date_text = date_label(an["dates"])
+    # رأس الملخص بتاريخ اليوم الذي أُعدّ فيه، لا تاريخ تصدير الملفات
+    date_text = today if re.fullmatch(r"\d{4}-\d{2}-\d{2}", today or "") else today_riyadh()
     st = Styles(xlsxedit._MIN_STYLES)
     s = _styles(st)
     sb, meta = build_sheet(s, rows, date_text)
@@ -507,4 +515,4 @@ def write_output(an: Dict[str, Any], choices: Dict[str, Dict[str, Any]],
         height = max(14, 6 + 2 * len(rows))
         charts[0] = [(xml, (1, top, 9, top + height))]
     xlsxedit.write_workbook(out_path, [("الملخص", sb)], st, charts=charts)
-    return {"rows": rows, "date": date_text}
+    return {"rows": rows, "date": date_text, "exports": date_label(an["dates"])}

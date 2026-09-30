@@ -4,13 +4,14 @@
 
   <div class="page-head">
     <h1>ملخص الأداء</h1>
-    <p>{{ an.feeders|length }} مغذٍّ، مصدّرة بتاريخ {% for d in date_text.split(' إلى ') %}<span dir="ltr">{{ d }}</span>{% if not loop.last %} إلى {% endif %}{% endfor %}. اكتب اسم المقاول كما تريده في الجدول، واختر إشعارات D1 التي تدخل الجدول الثاني.</p>
+    <p>{{ an.feeders|length }} مغذٍّ، مصدّرة بتاريخ {% for d in date_text.split(' إلى ') %}<span dir="ltr">{{ d }}</span>{% if not loop.last %} إلى {% endif %}{% endfor %}. اكتب اسم المقاول لكل مغذٍّ، واختر إشعارات D1 التي تدخل الجدول الثاني.</p>
   </div>
 
   {% if error %}<div class="errors">{{ error }}</div>{% endif %}
   {% for w in an.warnings %}<div class="errors">{{ w }}</div>{% endfor %}
 
   <form method="post" action="{{ url_for('summary_build', job_id=job_id) }}" id="smForm">
+    <input type="hidden" name="today" id="smToday">
 
     {% for f in an.feeders %}
     {% set i = loop.index0 %}
@@ -30,23 +31,18 @@
 
       <div class="sm-grid">
         <label class="sm-field">
-          <span>مقاول الجدول</span>
-          <select name="contractor_{{ i }}" class="sm-con">
-            {% for c, n in f.contractors %}
-            <option value="{{ c }}" {% if c == f.main %}selected{% endif %}>{{ c }} ({{ n }})</option>
-            {% endfor %}
-            {% if not f.contractors %}<option value="">— لا مقاول على إشعار D1 —</option>{% endif %}
-          </select>
-        </label>
-        <label class="sm-field">
-          <span>الاسم في الجدول</span>
+          <span>اسم المقاول</span>
           <input type="text" name="name_{{ i }}" class="sm-name" maxlength="80"
-                 value="{{ short(f.main) }}" placeholder="مثل: سنابل المشعان">
+                 placeholder="{{ short(f.main) or 'اكتب اسم المقاول' }}">
         </label>
-        <label class="sm-field">
+        <div class="sm-field">
           <span>الانتهاء من الصيانة <em>— اختياري</em></span>
-          <input type="date" name="end_{{ i }}" class="sm-end">
-        </label>
+          <span class="sm-date">
+            <!-- dir=ltr: حقل التاريخ في صفحة عربية يقلب «يوم/شهر/سنة» فيُقرأ مقلوبًا -->
+            <input type="date" name="end_{{ i }}" class="sm-end" dir="ltr">
+            <button type="button" class="btn-small sm-today">اليوم</button>
+          </span>
+        </div>
       </div>
 
       <div class="sm-notices">
@@ -88,7 +84,7 @@
 
     <button class="btn" type="submit">أنشئ الملخص</button>
     <span class="hint">
-      الاسم وتاريخ الانتهاء يحفظهما المتصفح لكل مغذٍّ، فيأتيان جاهزين في المرة القادمة.
+      اسم المقاول وتاريخ الانتهاء يحفظهما المتصفح لكل مغذٍّ، فيأتيان جاهزين في المرة القادمة. وإن تركت الاسم فارغًا كُتب الاسم الظاهر باهتًا في خانته.
     </span>
   </form>
 
@@ -96,20 +92,21 @@
 
 <script>
 (function () {
-  function shortName(s) {
-    return (s || "").replace(/^\s*(صيانة\s+عامة|ملاحظات\s+أشجار)\s*[-–—]\s*/, "")
-                    .replace(/^\s*مقاول\s+/, "").trim() || s;
-  }
   function store(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
   function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function today() {
+    var d = new Date(), p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  }
+
+  // تاريخ اليوم في رأس الملخص يؤخذ من جهازك لا من ساعة الخادم
+  document.getElementById("smToday").value = today();
 
   document.querySelectorAll(".sm-card").forEach(function (card) {
     var code = card.dataset.code;
-    var con = card.querySelector(".sm-con");
     var name = card.querySelector(".sm-name");
     var end = card.querySelector(".sm-end");
     var boxes = Array.prototype.slice.call(card.querySelectorAll('.sm-n input[type="checkbox"]'));
-    var ticksTouched = false, nameTouched = false;
 
     function recount() {
       var t = 0, c = 0, r = 0;
@@ -123,28 +120,18 @@
       card.querySelector(".d1p").textContent = t - c - r;
     }
 
-    // الاسم والتاريخ المحفوظان من المرة السابقة لهذا المغذي
+    // الاسم والتاريخ المكتوبان في المرة السابقة لهذا المغذي
     var sn = load("sm_name_" + code), se = load("sm_end_" + code);
-    if (sn) { name.value = sn; nameTouched = true; }
+    if (sn) name.value = sn;
     if (se) end.value = se;
 
-    name.addEventListener("input", function () { nameTouched = true; store("sm_name_" + code, name.value); });
+    name.addEventListener("input", function () { store("sm_name_" + code, name.value); });
     end.addEventListener("change", function () { store("sm_end_" + code, end.value); });
-
-    // تغيير مقاول الجدول يعيد الاختيار الأولي للإشعارات، ما لم تلمسها بيدك
-    con.addEventListener("change", function () {
-      if (!ticksTouched) {
-        boxes.forEach(function (b) {
-          var cons = JSON.parse(b.dataset.cons || "[]");
-          b.checked = b.dataset.phone !== "1" && cons.indexOf(con.value) >= 0;
-        });
-      }
-      if (!nameTouched) name.value = shortName(con.value);
-      recount();
+    card.querySelector(".sm-today").addEventListener("click", function () {
+      end.value = today();
+      store("sm_end_" + code, end.value);
     });
-    boxes.forEach(function (b) {
-      b.addEventListener("change", function () { ticksTouched = true; recount(); });
-    });
+    boxes.forEach(function (b) { b.addEventListener("change", recount); });
     recount();
   });
 })();

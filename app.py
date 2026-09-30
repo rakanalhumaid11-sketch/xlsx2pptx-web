@@ -1405,14 +1405,18 @@ def summary_build(job_id):
         choices[f["code"]] = {
             "name": (request.form.get("name_%d" % i) or "").strip()[:80],
             "end": (request.form.get("end_%d" % i) or "").strip()[:30],
-            "contractor": request.form.get("contractor_%d" % i) or f["main"],
+            # اسم المقاول يُكتب يدويًا؛ المقاول الأكثر على إشعارات D1 يبقى أساس
+            # الاختيار الأولي للإشعارات والاسم المقترح إن تُركت الخانة فارغة
+            "contractor": f["main"],
             # المؤشَّر فقط، ومن إشعارات الملف نفسه لا غير
             "ticks": [t for t in request.form.getlist("tick_%d" % i) if t in known],
         }
     out = os.path.join(d, "summary.xlsx")
     try:
         with heavy_lock():
-            res = summary.write_output(an, choices, out)
+            # تاريخ اليوم من جهاز المستخدم نفسه؛ وإن غاب فتوقيت السعودية
+            res = summary.write_output(an, choices, out,
+                                       today=(request.form.get("today") or "").strip())
     except Exception as exc:  # noqa: BLE001
         return redirect(url_for("summary_rules", job_id=job_id, e=f"تعذّر بناء الملخص: {exc}"))
     state["result"] = res

@@ -4,7 +4,7 @@
 
   <div class="page-head">
     <h1>الملخص جاهز</h1>
-    <p>ملخص الملاحظات وحالة الإنجاز حسب المغذي — بيانات مصدّرة بتاريخ {% for d in r.date.split(' إلى ') %}<span dir="ltr">{{ d }}</span>{% if not loop.last %} إلى {% endif %}{% endfor %}.</p>
+    <p>ملخص الملاحظات وحالة الإنجاز حسب المغذي بتاريخ <span dir="ltr">{{ r.date }}</span>.</p>
   </div>
 
   <a class="btn" href="{{ url_for('summary_download', job_id=job_id) }}">تحميل ملف الملخص</a>

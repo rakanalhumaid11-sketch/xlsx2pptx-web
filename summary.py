@@ -188,13 +188,19 @@ def default_ticks(notices: List[Dict[str, Any]], contractor: str) -> List[str]:
 # --------------------------------------------------------- الملف الملوّن
 
 def read_colored(path: str, name: str = "") -> Dict[str, Any]:
-    """أرقام الملاحظات وعدّ الألوان الأربعة من تعبئة الصفوف."""
+    """أرقام الملاحظات وعدّ الألوان الأربعة كما تظهر في إكسل.
+
+    اللون الظاهر لا المخزَّن: إذا لوّنت قاعدة شرطية الصف (مسترجع ← وردي)
+    فوق تعبئة خضراء، فالمستخدم يراه ورديًا ولا يعدّه أخضر، فلا نعدّه نحن."""
     an = sorter.analyze(path)
     counts = {k: 0 for k, *_ in COLOR_COLS}
-    skipped = 0
+    skipped = tool = 0
     for r in an["records"]:
-        hexc = (r.get("hex") or "").upper()
-        key = sorter.classify(hexc) if hexc and hexc not in TOOL_PALETTE else "none"
+        hexc = (r.get("shown", r.get("hex")) or "").upper()
+        if hexc in TOOL_PALETTE:
+            tool += 1
+            continue
+        key = sorter.classify(hexc) if hexc else "none"
         if key in counts:
             counts[key] += 1
         elif hexc:
@@ -209,7 +215,8 @@ def read_colored(path: str, name: str = "") -> Dict[str, Any]:
         "rows": an["total"],
         "counts": counts,
         "other": skipped,
-        "uncolored": an["total"] - sum(counts.values()) - skipped,
+        "tool": tool,
+        "uncolored": an["total"] - sum(counts.values()) - skipped - tool,
         "ids": ids,
         "export": export,
     }

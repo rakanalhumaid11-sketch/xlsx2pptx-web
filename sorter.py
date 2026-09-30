@@ -161,15 +161,12 @@ def _theme_colors(z: zipfile.ZipFile) -> Dict[str, str]:
     return out
 
 
-def _fill_color(fill_xml: str, theme: Dict[str, str]) -> str:
-    """لون التعبئة السداسي، أو "" إذا كانت الخلية بلا تعبئة."""
-    if 'patternType="solid"' not in fill_xml:
-        return ""
-    m = re.search(r"<fgColor\b([^>]*)/?>", fill_xml)
-    if not m:
-        return ""
-    a = _attrs(m.group(1))
-    tint = float(a.get("tint", "0") or 0)
+def _color_attr(a: Dict[str, str], theme: Dict[str, str]) -> str:
+    """لون سداسي من خصائص عنصر لون (rgb أو theme مع tint)."""
+    try:
+        tint = float(a.get("tint", "0") or 0)
+    except ValueError:
+        tint = 0.0
     if "rgb" in a:
         return apply_tint(a["rgb"], tint)
     if "theme" in a:
@@ -180,6 +177,121 @@ def _fill_color(fill_xml: str, theme: Dict[str, str]) -> str:
         base = theme.get(name, "")
         return apply_tint(base, tint) if base else ""
     return ""
+
+
+def _fill_color(fill_xml: str, theme: Dict[str, str]) -> str:
+    """لون التعبئة السداسي، أو "" إذا كانت الخلية بلا تعبئة."""
+    if 'patternType="solid"' not in fill_xml:
+        return ""
+    m = re.search(r"<fgColor\b([^>]*)/?>", fill_xml)
+    if not m:
+        return ""
+    return _color_attr(_attrs(m.group(1)), theme)
+
+
+# ------------------------------------------------------ التنسيق الشرطي
+#
+# أداة الاعتماد تضيف للملف قواعد مثل ‎$AO2="مسترجع"‎ تلوّن الصف كله وردياً.
+# إكسل يعرض لون القاعدة فوق التعبئة الأصلية، فمن يعدّ الصفوف بعينه يرى
+# الوردي لا الأخضر الذي تحته. فاللون «الظاهر» يُحسب بتقييم هذه القواعد.
+
+def _dxf_colors(styles: str, theme: Dict[str, str]) -> List[Optional[str]]:
+    """لون تعبئة كل تنسيق شرطي: None = لا يمسّ التعبئة، "" = يزيلها."""
+    m = re.search(r"<dxfs\b[^>]*>(.*?)</dxfs\s*>", styles, re.S)
+    out: List[Optional[str]] = []
+    if not m:
+        return out
+    for d in re.findall(r"<dxf\b[^>]*?(?:/>|>(.*?)</dxf\s*>)", m.group(1), re.S):
+        pf = re.search(r"<patternFill\b([^>]*?)(?:/>|>(.*?)</patternFill\s*>)", d or "", re.S)
+        if not pf:
+            out.append(None)
+            continue
+        pt = _attrs(pf.group(1)).get("patternType")
+        if pt == "none":
+            out.append("")
+            continue
+        body = pf.group(2) or ""
+        fg = re.search(r"<fgColor\b([^>]*?)/?>", body)
+        bg = re.search(r"<bgColor\b([^>]*?)/?>", body)
+        # في التنسيق الشرطي يكتب إكسل اللون في bgColor؛ ومع solid صريح يُعرض fgColor
+        order = (fg, bg) if pt == "solid" else (bg, fg)
+        color = ""
+        for mm in order:
+            if mm:
+                color = _color_attr(_attrs(mm.group(1)), theme)
+                if color:
+                    break
+        out.append(color or None)
+    return out
+
+
+_CF_RE = re.compile(r"<conditionalFormatting\b([^>]*)>(.*?)</conditionalFormatting\s*>", re.S)
+_RULE_RE = re.compile(r"<cfRule\b([^>]*?)(?:/>|>(.*?)</cfRule\s*>)", re.S)
+_FORMULA_RE = re.compile(r"<formula>(.*?)</formula\s*>", re.S)
+_REF_EQ_RE = re.compile(r'^\s*=?\s*(\$?)([A-Za-z]{1,3})(\$?)(\d+)\s*=\s*'
+                        r'(?:"((?:[^"]|"")*)"|(-?\d+(?:\.\d+)?))\s*$')
+_CONST_RE = re.compile(r'^\s*(?:"((?:[^"]|"")*)"|(-?\d+(?:\.\d+)?))\s*$')
+_RANGE_RE = re.compile(r"^\$?([A-Za-z]{1,3})\$?(\d+)(?::\$?([A-Za-z]{1,3})\$?(\d+))?$")
+
+
+def _same(value: str, text: Optional[str], num: Optional[str]) -> bool:
+    """مقارنة إكسل للمساواة: النص دون حساسية لحالة الحروف، والرقم رقمًا."""
+    if num is not None:
+        try:
+            return float(value) == float(num)
+        except ValueError:
+            return False
+    return value.casefold() == (text or "").replace('""', '"').casefold()
+
+
+def _cf_rules(sheet: str, dxf: List[Optional[str]]) -> List[Dict[str, Any]]:
+    """قواعد التلوين الشرطي التي نفهمها، مرتّبة بالأولوية.
+
+    نفهم الشائع فقط: ‎$AO2="نص"‎ (تعبير مساواة)، و«يساوي» و«يحتوي على» على
+    الخلية نفسها. ما عداها يُتجاهل فيبقى اللون الأصلي للخلية."""
+    rules: List[Dict[str, Any]] = []
+    for cf_attrs, body in _CF_RE.findall(sheet):
+        ranges = []
+        for part in _attrs(cf_attrs).get("sqref", "").split():
+            m = _RANGE_RE.match(part)
+            if not m:
+                continue
+            c1, r1 = col_index(m.group(1)), int(m.group(2))
+            c2 = col_index(m.group(3)) if m.group(3) else c1
+            r2 = int(m.group(4)) if m.group(4) else r1
+            ranges.append((min(c1, c2), min(r1, r2), max(c1, c2), max(r1, r2)))
+        if not ranges:
+            continue
+        top_c, top_r = ranges[0][0], ranges[0][1]
+        for ra_s, rb in _RULE_RE.findall(body):
+            ra = _attrs(ra_s)
+            try:
+                pri = int(ra.get("priority", "0"))
+                dxf_id = int(ra["dxfId"]) if "dxfId" in ra else -1
+            except ValueError:
+                continue
+            color = dxf[dxf_id] if 0 <= dxf_id < len(dxf) else None
+            formulas = [html.unescape(f) for f in _FORMULA_RE.findall(rb or "")]
+            kind = ra.get("type", "")
+            test: Optional[Dict[str, Any]] = None
+            if kind == "expression" and formulas:
+                m = _REF_EQ_RE.match(formulas[0])
+                if m:
+                    test = {"k": "ref", "cabs": bool(m.group(1)), "col": col_index(m.group(2)),
+                            "rabs": bool(m.group(3)), "row": int(m.group(4)),
+                            "text": m.group(5), "num": m.group(6)}
+            elif kind == "cellIs" and ra.get("operator") == "equal" and formulas:
+                m = _CONST_RE.match(formulas[0])
+                if m:
+                    test = {"k": "own", "text": m.group(1), "num": m.group(2)}
+            elif kind == "containsText" and ra.get("text"):
+                test = {"k": "has", "text": html.unescape(ra["text"])}
+            if test is None:
+                continue
+            rules.append({"pri": pri, "ranges": ranges, "top": (top_c, top_r),
+                          "color": color, "stop": ra.get("stopIfTrue") == "1", "test": test})
+    rules.sort(key=lambda r: r["pri"])
+    return rules
 
 
 # --------------------------------------------------------------- التحليل
@@ -252,8 +364,10 @@ def analyze(path: str) -> Dict[str, Any]:
         sheet_path, sheet_name = _sheet_path(z)
         sst = _shared_strings(z)
         theme = _theme_colors(z)
-        xf_fill, fills = _fill_of_xf(z.read("xl/styles.xml").decode("utf-8"))
+        styles = z.read("xl/styles.xml").decode("utf-8")
+        xf_fill, fills = _fill_of_xf(styles)
         sheet = z.read(sheet_path).decode("utf-8")
+    cf = _cf_rules(sheet, _dxf_colors(styles, theme))
 
     # لون كل نمط خلية، محسوبًا مرة واحدة
     xf_color: List[str] = []
@@ -309,10 +423,48 @@ def analyze(path: str) -> Dict[str, Any]:
     c_type = _find_col(headers, TYPE_ALIASES)
     c_d1 = _find_col(headers, D1_ALIASES)
 
+    # خلايا كل صف مفهرسة برقم العمود، لتقييم قواعد التنسيق الشرطي
+    grid: Dict[int, Dict[int, Tuple[Dict[str, str], str]]] = {}
+    if cf:
+        for rn, body in rows_raw:
+            row: Dict[int, Tuple[Dict[str, str], str]] = {}
+            for ca, cb in _CELL_RE.findall(body):
+                a = _attrs(ca)
+                if "r" in a:
+                    row[col_index(col_letters(a["r"]))] = (a, cb)
+            grid[rn] = row
+
+    def cell_value(r: int, c: int) -> str:
+        hit = grid.get(r, {}).get(c)
+        return value(*hit) if hit else ""
+
+    def shown_fill(r: int, c: int, static: str) -> str:
+        """لون الخلية كما يعرضه إكسل: أول قاعدة شرطية تنطبق تغلب تعبئتها."""
+        for rule in cf:
+            if not any(c1 <= c <= c2 and r1 <= r <= r2 for c1, r1, c2, r2 in rule["ranges"]):
+                continue
+            t = rule["test"]
+            if t["k"] == "ref":
+                tr = t["row"] if t["rabs"] else t["row"] + (r - rule["top"][1])
+                tc = t["col"] if t["cabs"] else t["col"] + (c - rule["top"][0])
+                ok = _same(cell_value(tr, tc), t["text"], t["num"])
+            elif t["k"] == "own":
+                ok = _same(cell_value(r, c), t["text"], t["num"])
+            else:
+                ok = t["text"].casefold() in cell_value(r, c).casefold()
+            if not ok:
+                continue
+            if rule["color"] is not None:
+                return rule["color"]
+            if rule["stop"]:
+                break
+        return static
+
     recs: List[Dict[str, Any]] = []
     for rn, body in rows_raw[hdr_i + 1:]:
         cells: Dict[str, Tuple[Dict[str, str], str]] = {}
         colors: Dict[str, int] = {}
+        shown: Dict[str, int] = {}
         any_value = False
         for ca, cb in _CELL_RE.findall(body):
             a = _attrs(ca)
@@ -322,6 +474,7 @@ def analyze(path: str) -> Dict[str, Any]:
             letter = col_letters(ref)
             cells[letter] = (a, cb)
             s = a.get("s")
+            c = ""
             if s is not None:
                 try:
                     c = xf_color[int(s)]
@@ -329,6 +482,10 @@ def analyze(path: str) -> Dict[str, Any]:
                     c = ""
                 if c:
                     colors[c] = colors.get(c, 0) + 1
+            if cf:
+                sc = shown_fill(rn, col_index(letter), c)
+                if sc:
+                    shown[sc] = shown.get(sc, 0) + 1
             if (cb or "").strip():
                 any_value = True
         if not any_value:
@@ -342,6 +499,8 @@ def analyze(path: str) -> Dict[str, Any]:
             "d1": bool(value(*cells[c_d1]).strip()) if c_d1 in cells else False,
             "color": key,
             "hex": hexc,
+            # اللون الظاهر في إكسل بعد التنسيق الشرطي؛ هو ما يعدّه المستخدم بعينه
+            "shown": (max(shown.items(), key=lambda kv: kv[1])[0] if shown else "") if cf else hexc,
         })
 
     def tally(field: str) -> List[Tuple[str, int]]:

@@ -74,6 +74,7 @@
         <span class="sm-chip" style="background:#{{ bg }};color:#{{ fg }}">{{ label }} {{ f.colored.counts[key] }}</span>
         {% endfor %}
         {% if f.colored.uncolored %}<span class="sm-dim">بلا لون {{ f.colored.uncolored }}</span>{% endif %}
+        {% if f.colored.tool %}<span class="sm-dim">بلون أداة الاعتماد (مسترجع وغيره) لا تُحسب {{ f.colored.tool }}</span>{% endif %}
         {% if f.colored.other %}<span class="sm-dim">ألوان خارج الأربعة لا تُحسب {{ f.colored.other }}</span>{% endif %}
         {% else %}
         <span class="sm-warn">لم يُرفع ملف ملوّن لهذا المغذي — يُكتب ذلك في الجدول الثالث بدل الأرقام.</span>

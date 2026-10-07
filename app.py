@@ -1124,18 +1124,68 @@ def photos_start():
 
     with open(os.path.join(d, "analysis.pkl"), "wb") as fh:
         pickle.dump(an, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    # ملف بحالة واحدة لا يحتاج صفحة المفاتيح: يبدأ التجهيز فورًا
+    several = len(photoreview.status_groups(an)) > 1
     write_state(d, {
         "job_id": job_id,
         "kind": "photos",
-        "stage": "preparing",
+        "stage": "choosing" if several else "preparing",
         "stem": os.path.splitext(os.path.basename(f.filename))[0][:60] or "الملاحظات",
         "main_path": path,
         "n_notes": an["total"], "n_images": an["n_images"],
         "with_after": an["with_after"],
+        "off": [],
         "progress": {"done": 0, "total": an["n_images"]},
         "updated_at": time.time(),
         "created_at": time.time(),
     })
+    if several:
+        return redirect(url_for("photos_statuses", job_id=job_id))
+    threading.Thread(target=_run_photo_prep, args=(job_id,), daemon=True).start()
+    return redirect(url_for("photos_progress", job_id=job_id))
+
+
+@app.route("/job/<job_id>/photos/statuses")
+def photos_statuses(job_id, error=None):
+    d, state = _photos_state(job_id)
+    if state.get("stage") == "preparing":
+        return redirect(url_for("photos_progress", job_id=job_id))
+    an = _load_analysis(d)
+    return render_template("photos_statuses.html", job_id=job_id, state=state,
+                           groups=photoreview.status_groups(an),
+                           off=state.get("off") or [],
+                           # أول مرة: المفاتيح من ذاكرة المتصفح؛ بعدها مما اخترته لهذا الملف
+                           first=state.get("stage") == "choosing",
+                           error=error)
+
+
+@app.route("/job/<job_id>/photos/prep", methods=["POST"])
+def photos_prep(job_id):
+    """يحفظ الحالات المطفأة ويجهّز صور المفعّلة فقط."""
+    d, state = _photos_state(job_id)
+    if state.get("stage") == "preparing":
+        return redirect(url_for("photos_progress", job_id=job_id))
+    an = _load_analysis(d)
+    groups = photoreview.status_groups(an)
+    on = {request.form.get("st_%d" % i) for i in range(len(groups))}
+    off = [g["key"] for i, g in enumerate(groups) if str(i) not in on]
+    if len(off) == len(groups):
+        return photos_statuses(job_id, error="شغّل حالة واحدة على الأقل — وإلا فلا صور تُراجع."), 400
+
+    state["off"] = off
+    gone = photoreview.off_rows(an, off)
+    have = {int(k) for k in (state.get("choices") or {})}
+    todo = [n for n in an["notes"] if n["row"] not in gone and n["row"] not in have]
+    if not todo and state.get("stage") == "ready":
+        # كل المفعّل جاهز من قبل (أطفأتَ حالة فقط): لا تنزيل
+        write_state(d, state)
+        return redirect(url_for("photos_review", job_id=job_id))
+    state["stage"] = "preparing"
+    state["progress"] = {"done": 0,
+                         "total": sum(len(n["before"]) + len(n["after"]) for n in todo) or 1}
+    state["updated_at"] = time.time()
+    state.pop("error_message", None)
+    write_state(d, state)
     threading.Thread(target=_run_photo_prep, args=(job_id,), daemon=True).start()
     return redirect(url_for("photos_progress", job_id=job_id))
 
@@ -1157,16 +1207,25 @@ def _run_photo_prep(job_id: str):
             s["updated_at"] = now
             write_state(d, s)
 
+        # الحالات المطفأة لا تُنزَّل صورها، وما رُشّح في جولة سابقة (قبل
+        # تشغيل حالة جديدة) لا يُعاد: اختيارات المستخدم فيه محفوظة كما هي
+        st0 = read_state(d)
+        gone = photoreview.off_rows(an, st0.get("off"))
+        have = {int(k) for k in (st0.get("choices") or {})}
+        only = {n["row"] for n in an["notes"]} - gone - have
+
         # التنزيل لا يأخذ القفل الثقيل: ذروته نحو ثلاثين ميجا (صورة واحدة
         # في الذاكرة لكل خيط)، فحجزه ثماني دقائق يعطّل توليد التقارير بلا داعٍ
-        res = photoreview.prepare(an, _thumbs_dir(d), progress_cb=cb)
+        res = photoreview.prepare(an, _thumbs_dir(d), progress_cb=cb, only=only)
 
         s = read_state(d)
         s["stage"] = "ready"
         s["prep"] = {"images": res["images"], "fetched": res["fetched"],
                      "failed": len(res["failed"]),
                      "mb": round(res["bytes"] / 1048576, 1)}
-        s["choices"] = {str(k): v for k, v in res["choices"].items()}
+        new = {str(k): v for k, v in res["choices"].items()}
+        new.update(s.get("choices") or {})
+        s["choices"] = new
         s["updated_at"] = time.time()
         write_state(d, s)
     except Exception as exc:  # noqa: BLE001
@@ -1200,10 +1259,17 @@ def photos_review(job_id):
     d, state = _photos_state(job_id)
     if state.get("stage") == "preparing":
         return redirect(url_for("photos_progress", job_id=job_id))
+    if state.get("stage") == "choosing":
+        return redirect(url_for("photos_statuses", job_id=job_id))
     an = _load_analysis(d)
     choices = state.get("choices") or {}
+    off = set(state.get("off") or [])
+    gone = photoreview.off_rows(an, off)
+    groups = photoreview.status_groups(an)
     notes = []
     for n in an["notes"]:
+        if n["row"] in gone:
+            continue
         ch = choices.get(str(n["row"])) or {}
         tags = ch.get("tags") if "tags" in ch else (n.get("tags") or [])
         text = ch.get("text") if "text" in ch else (n.get("text") or "")
@@ -1244,6 +1310,8 @@ def photos_review(job_id):
                            n_returned=sum(1 for n in notes if n["returned"]),
                            n_blocked=sum(1 for n in notes if n["blocked"]),
                            statuses=statuses,
+                           off_groups=[g for g in groups if g["key"] in off],
+                           many_groups=len(groups) > 1,
                            n_noted=sum(1 for n in notes if n["tags"] or n["text"].strip()))
 
 
@@ -1303,7 +1371,8 @@ def photos_build(job_id):
     choices = {int(k): v for k, v in (state.get("choices") or {}).items()}
     out_path = os.path.join(d, "output.xlsx")
     try:
-        result = photoreview.write_output(an, choices, src, out_path)
+        result = photoreview.write_output(an, choices, src, out_path,
+                                          off=state.get("off") or [])
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": f"{exc}"}), 500
     state["result"] = result

@@ -120,6 +120,47 @@ def status_info(status: str) -> Dict[str, str]:
     return {"code": raw, "label": raw, "kind": "other"}
 
 
+def status_key(status: Any) -> str:
+    """قيمة الحالة كما في الملف — مفتاح مفاتيح الصور. الفارغة مفتاحها ""."""
+    t = str(status or "").strip()
+    return "" if t.lower() in ("none", "null", "-") else t
+
+
+# ترتيب الحالات في صفحة المفاتيح: المقفل أولًا ثم ما بعده في مسار الملاحظة
+GROUP_ORDER = ["ok", "done", "returned", "blocked", "wait", "other", "none"]
+# اسم مختصر للمفتاح بالتسمية الدارجة في الميدان
+GROUP_SHORT = {"ASSIGNED": "جاري المعالجة (مُسندة)", "IN_PROGRESS": "جاري العمل"}
+
+
+def short_label(status: Any) -> str:
+    info = status_info(status_key(status))
+    return GROUP_SHORT.get(info["code"]) or info["label"].split(" — ")[0]
+
+
+def status_groups(an: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """حالات الملف بأعدادها: [{key, code, label, short, kind, n, images}]."""
+    groups: Dict[str, Dict[str, Any]] = {}
+    for n in an["notes"]:
+        k = status_key(n.get("status", ""))
+        g = groups.get(k)
+        if g is None:
+            info = status_info(k)
+            g = groups[k] = dict(info, key=k, n=0, images=0, short=short_label(k))
+        g["n"] += 1
+        g["images"] += len(n["before"]) + len(n["after"])
+    return sorted(groups.values(),
+                  key=lambda g: (GROUP_ORDER.index(g["kind"]) if g["kind"] in GROUP_ORDER
+                                 else 99, -g["n"]))
+
+
+def off_rows(an: Dict[str, Any], off: Any) -> set:
+    """صفوف الملاحظات التي أطفأ المستخدم صور حالتها."""
+    off = set(off or ())
+    if not off:
+        return set()
+    return {n["row"] for n in an["notes"] if status_key(n.get("status", "")) in off}
+
+
 def is_returned(status: str) -> bool:
     t = (status or "").strip()
     return t.upper() in RETURNED or _norm(t) in {_norm(x) for x in RETURNED}
@@ -289,9 +330,13 @@ def _thumb(raw: bytes, dst: str) -> bool:
 
 
 def prepare(an: Dict[str, Any], thumb_dir: str, progress_cb=None,
-            rank: bool = True) -> Dict[str, Any]:
-    """ينزّل صور كل الملاحظات ويصغّرها، ثم يرشّح أفضل زوج لكل ملاحظة."""
+            rank: bool = True, only: Optional[set] = None) -> Dict[str, Any]:
+    """ينزّل صور الملاحظات ويصغّرها، ثم يرشّح أفضل زوج لكل ملاحظة.
+
+    only: صفوف بعينها (الحالات المفعّلة)؛ صور الحالات المطفأة لا تُنزَّل أصلًا."""
     os.makedirs(thumb_dir, exist_ok=True)
+    if only is not None:
+        an = dict(an, notes=[n for n in an["notes"] if n["row"] in only])
     urls: List[str] = []
     seen = set()
     for n in an["notes"]:
@@ -425,16 +470,34 @@ def resolve_hide(ch: Dict[str, Any]) -> bool:
 
 
 def write_output(an: Dict[str, Any], choices: Dict[int, Dict[str, Any]],
-                 src_path: str, out_path: str) -> Dict[str, Any]:
+                 src_path: str, out_path: str, off: Any = None) -> Dict[str, Any]:
     """نسخة من الملف: أعمدة الصور مرتّبة حسب الاختيار، وملاحظات المراجعة.
 
     الصور لا تُحذف ولا تُضاف: تُبادَل خليتان فقط داخل عمودهما، فتصير
     المختارة في «صورة قبل 1» و«صورة بعد 1». و«احذف الصورة» لا يمسح الرابط
     من الإكسل — الصورة المرفوضة دليلك عند إرجاع العمل — بل يُكتب في عمود
-    «صورة المعالجة في التقرير» أنها محذوفة، فيكتب مولّد التقرير النص مكانها."""
+    «صورة المعالجة في التقرير» أنها محذوفة، فيكتب مولّد التقرير النص مكانها.
+
+    off: حالات أطفأ المستخدم صورها — تُمسح روابط صور ملاحظاتها كلها (قبل
+    وبعد) مع الرابط التشعبي للخلية، فلا تظهر لها صورة في التقرير."""
     cell_values: Dict[Tuple[int, int], Any] = {}
     moved = 0
-    by_row = {n["row"]: n for n in an["notes"]}
+    gone = off_rows(an, off)
+    by_row = {n["row"]: n for n in an["notes"] if n["row"] not in gone}
+
+    drop_links: set = set()
+    move_links: Dict[str, str] = {}
+    cleared: Dict[str, int] = {}
+    photo_cols = list(an["before_cols"]) + list(an["after_cols"])
+    for n in an["notes"]:
+        if n["row"] not in gone:
+            continue
+        lbl = short_label(n.get("status", ""))
+        cleared[lbl] = cleared.get(lbl, 0) + 1
+        for c in photo_cols:
+            cell_values[(n["row"], c)] = None
+            drop_links.add("%s%d" % (xlsxedit.col_letter(c), n["row"]))
+
     for row, ch in choices.items():
         n = by_row.get(row)
         if not n:
@@ -450,6 +513,9 @@ def write_output(an: Dict[str, Any], choices: Dict[int, Dict[str, Any]],
             raw[0], raw[j] = raw[j], raw[0]
             cell_values[(row, cols[0])] = raw[0] or None
             cell_values[(row, cols[j])] = raw[j] or None
+            a_ref = "%s%d" % (xlsxedit.col_letter(cols[0]), row)
+            b_ref = "%s%d" % (xlsxedit.col_letter(cols[j]), row)
+            move_links[a_ref], move_links[b_ref] = b_ref, a_ref
             moved += 1
 
     # ملاحظات المراجعة: في أعمدة الجولة السابقة إن وُجدت، وإلا عمودان جديدان
@@ -459,6 +525,8 @@ def write_output(an: Dict[str, Any], choices: Dict[int, Dict[str, Any]],
     ph_vals: Dict[int, Any] = {}
     n_notes = n_hidden = n_ret_noted = 0
     for n in an["notes"]:
+        if n["row"] in gone:
+            continue
         ch = choices.get(n["row"]) or {}
         tags = ch.get("tags") if "tags" in ch else n.get("tags")
         text = ch.get("text") if "text" in ch else n.get("text")
@@ -504,12 +572,12 @@ def write_output(an: Dict[str, Any], choices: Dict[int, Dict[str, Any]],
         src_path, out_path,
         sheet_name=an["sheet"], header_row=an["header_row"],
         n_cols=n_cols, cell_values=cell_values, new_columns=new_columns,
-        cell_fills=cell_fills)
+        cell_fills=cell_fills, drop_links=drop_links, move_links=move_links)
 
     comparable = sum(1 for r, c in choices.items()
                      if by_row.get(r) and by_row[r]["after"]
                      and c.get("score", 0) >= COMPARABLE)
-    with_after = sum(1 for n in an["notes"] if n["after"])
+    with_after = sum(1 for n in by_row.values() if n["after"])
     return {
         "notes": len(by_row),
         "with_after": with_after,
@@ -519,7 +587,9 @@ def write_output(an: Dict[str, Any], choices: Dict[int, Dict[str, Any]],
         "not_comparable": with_after - comparable,
         "review_notes": n_notes,
         "hidden": n_hidden,
-        "returned": an.get("n_returned", 0),
+        "returned": sum(1 for n in by_row.values() if n.get("returned")),
+        "photos_cleared": len(gone),
+        "photos_cleared_by": sorted(cleared.items(), key=lambda t: -t[1]),
         "returned_noted": n_ret_noted,
         "stem": os.path.splitext(os.path.basename(src_path))[0],
     }

@@ -477,7 +477,14 @@ def patch_sheet(sheet_xml: str, styles: Styles, *, header_row: int, n_cols: int,
     التلوين هنا ثابت لأنه يخصّ صفوفًا محدّدة بأعيانها (ما طابق ملفات التنفيذ)
     لا شرطًا في البيانات؛ أما التلوين حسب الحالة فتنسيق شرطي حيّ."""
     row_fills = row_fills or {}
-    cell_fills = cell_fills or {}
+    # فهرسة بالصف: مسح روابط الصور قد يمسّ آلاف الخلايا، والمرور على القاموس
+    # كله مع كل صف يصير بطيئًا في ملف من ستمئة صف
+    values_by_row: Dict[int, List[Tuple[int, Any]]] = {}
+    for (vr, vc), value in cell_values.items():
+        values_by_row.setdefault(vr, []).append((vc, value))
+    fills_by_row: Dict[int, List[Tuple[int, str]]] = {}
+    for (fr, fc), fhex in (cell_fills or {}).items():
+        fills_by_row.setdefault(fr, []).append((fc, fhex))
     n_new = len(new_columns)
     total_cols = n_cols + n_new
 
@@ -515,9 +522,7 @@ def patch_sheet(sheet_xml: str, styles: Styles, *, header_row: int, n_cols: int,
         cells = _cells_by_col(inner)
         touched = False
 
-        for (vr, vc), value in cell_values.items():
-            if vr != rn:
-                continue
+        for vc, value in values_by_row.get(rn, ()):
             base = _cell_style(cells[vc]) if vc in cells else None
             cells[vc] = _text_cell("%s%d" % (col_letter(vc), rn), base, value)
             touched = True
@@ -549,8 +554,8 @@ def patch_sheet(sheet_xml: str, styles: Styles, *, header_row: int, n_cols: int,
                     cells[c] = '<c r="%s%d" s="%d"/>' % (col_letter(c), rn, new_s)
             touched = True
 
-        for (fr, fc), fhex in cell_fills.items():
-            if fr != rn or rn <= header_row:
+        for fc, fhex in fills_by_row.get(rn, ()):
+            if rn <= header_row:
                 continue
             base = _cell_style(cells[fc]) if fc in cells else 0
             new_s = styles.tinted(base, fhex)
@@ -587,6 +592,66 @@ def patch_sheet(sheet_xml: str, styles: Styles, *, header_row: int, n_cols: int,
                 + head[head.rindex("<sheetData"):]
 
     return head + data + tail
+
+
+def _ref_cells(ref: str) -> List[str]:
+    """خلايا مرجع مثل «AD9» أو «AD9:AE10»."""
+    m = re.fullmatch(r"([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?", ref.replace("$", ""))
+    if not m:
+        return [ref]
+    if not m.group(3):
+        return [m.group(1) + m.group(2)]
+    c1, c2 = sorted((col_index(m.group(1)), col_index(m.group(3))))
+    r1, r2 = sorted((int(m.group(2)), int(m.group(4))))
+    return ["%s%d" % (col_letter(c), r) for r in range(r1, r2 + 1) for c in range(c1, c2 + 1)]
+
+
+def drop_hyperlinks(sheet_xml: str, refs: set) -> Tuple[str, List[str]]:
+    """يحذف روابط الخلايا المذكورة. يرجع (الورقة، معرّفات علاقاتها المحذوفة).
+
+    الرابط في إكسل مربوط برقم الخلية لا بنصّها: لو مُسح النص وبقي الرابط
+    لبقيت الخلية الفارغة تفتح الصورة عند الضغط عليها."""
+    if not refs or "<hyperlink" not in sheet_xml:
+        return sheet_xml, []
+    removed: List[str] = []
+
+    def one(m: "re.Match") -> str:
+        tag = m.group(0)
+        ref = _get_attr(tag, "ref") or ""
+        if ref and all(c in refs for c in _ref_cells(ref)):
+            rid = _get_attr(tag, "r:id")
+            if rid:
+                removed.append(rid)
+            return ""
+        return tag
+
+    sheet_xml = re.sub(r"<hyperlink\b[^>]*?(?:/>|>.*?</hyperlink>)", one, sheet_xml, flags=re.S)
+    # حاوية فارغة غير مسموحة في مواصفة الملف، فتُحذف معها
+    sheet_xml = re.sub(r"<hyperlinks>\s*</hyperlinks>|<hyperlinks/>", "", sheet_xml)
+    return sheet_xml, removed
+
+
+def move_hyperlinks(sheet_xml: str, moves: Dict[str, str]) -> str:
+    """ينقل روابط خلايا إلى خلايا أخرى ({"AD9": "AF9"}).
+
+    حين تُبادَل قيمتا خليتين يجب أن يتبع كلَّ رابط نصُّه، وإلا صار نص
+    «صورة قبل 1» صورةً وضغطه يفتح صورة أخرى."""
+    if not moves or "<hyperlink" not in sheet_xml:
+        return sheet_xml
+
+    def one(m: "re.Match") -> str:
+        tag = m.group(0)
+        ref = _get_attr(tag, "ref") or ""
+        return _set_attr(tag, "ref", moves[ref]) if ref in moves else tag
+
+    return re.sub(r"<hyperlink\b[^>]*?/>", one, sheet_xml)
+
+
+def _drop_rels(rels_xml: str, rids: List[str]) -> str:
+    want = set(rids)
+    return re.sub(r"<Relationship\b[^>]*/>",
+                  lambda m: "" if _get_attr(m.group(0), "Id") in want else m.group(0),
+                  rels_xml)
 
 
 # ------------------------------------------------------------------ الأرشيف
@@ -645,8 +710,13 @@ def write_patched(src_path: str, dst_path: str, *, sheet_name: str,
                   cell_fills: Optional[Dict[Tuple[int, int], str]] = None,
                   cf: Optional[Tuple[str, List[Tuple[str, str]]]] = None,
                   validation: Optional[Tuple[str, List[str]]] = None,
-                  sheets_factory=None) -> None:
-    """ينسخ الملف كما هو مع تعديل ورقة واحدة وإضافة أوراق جديدة."""
+                  sheets_factory=None,
+                  drop_links: Optional[set] = None,
+                  move_links: Optional[Dict[str, str]] = None) -> None:
+    """ينسخ الملف كما هو مع تعديل ورقة واحدة وإضافة أوراق جديدة.
+
+    drop_links: مراجع خلايا («AD9») تُحذف روابطها مع مسح قيمها.
+    move_links: روابط تنتقل مع قيمها حين تُبادَل خليتان."""
     with zipfile.ZipFile(src_path) as zin:
         names = set(zin.namelist())
         part, _display = locate_sheet(zin, sheet_name)
@@ -665,6 +735,14 @@ def write_patched(src_path: str, dst_path: str, *, sheet_name: str,
             sheet_xml, styles, header_row=header_row, n_cols=n_cols,
             cell_values=cell_values, new_columns=new_columns, row_fills=row_fills,
             cell_fills=cell_fills)
+        sheet_rels_part = "%s/_rels/%s.rels" % tuple(part.rsplit("/", 1))
+        sheet_rels = None
+        if move_links:
+            sheet_xml = move_hyperlinks(sheet_xml, move_links)
+        if drop_links:
+            sheet_xml, gone = drop_hyperlinks(sheet_xml, drop_links)
+            if gone and sheet_rels_part in names:
+                sheet_rels = _drop_rels(zin.read(sheet_rels_part).decode("utf-8"), gone)
         if validation:
             sheet_xml = add_list_validation(sheet_xml, validation[0], validation[1])
         if cf:
@@ -719,6 +797,8 @@ def write_patched(src_path: str, dst_path: str, *, sheet_name: str,
             "xl/_rels/workbook.xml.rels": rels_xml,
             "[Content_Types].xml": ct_xml,
         }
+        if sheet_rels is not None:
+            replaced[sheet_rels_part] = sheet_rels
 
         with zipfile.ZipFile(dst_path, "w", zipfile.ZIP_DEFLATED) as zout:
             for info in zin.infolist():

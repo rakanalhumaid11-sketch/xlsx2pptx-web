@@ -31,6 +31,18 @@
     </div>
   </div>
 
+  {% if many_groups %}
+  <div class="ph-note">
+    {% if off_groups %}
+    صور هذه الحالات لا تُراجع وتُمسح روابطها من الملف:
+    {% for g in off_groups %}<b>{{ g.short }}</b> {{ g.n }}{% if not loop.last %}، {% endif %}{% endfor %}
+    {% else %}
+    صور كل الحالات معروضة.
+    {% endif %}
+    <a href="{{ url_for('photos_statuses', job_id=job_id) }}" id="goStatuses">تعديل الحالات</a>
+  </div>
+  {% endif %}
+
   <div id="list">
     {% for n in notes %}
     {% set noted = n.tags or n.text %}
@@ -286,6 +298,8 @@
           "<li><span>عليها ملاحظة مراجعة</span><b>" + r.review_notes + "</b></li>" +
           "<li><span>صورة حُذفت من التقرير والنص مكانها</span><b>" + r.hidden + "</b></li>" +
           (r.returned ? "<li><span>مسترجعة</span><b style='color:#FF6B6B'>" + r.returned + "</b></li>" : "") +
+          (r.photos_cleared ? "<li><span>مُسحت روابط صورها (حالات مطفأة)</span><b style='color:#FF6B6B'>" +
+            r.photos_cleared + "</b></li>" : "") +
           "<li><span>زاويتان مختلفتان</span><b>" + r.not_comparable + "</b></li>" +
           "<li><span>بلا صورة «بعد»</span><b>" + r.no_after + "</b></li>" +
           "</ul><a class='btn' href='" + d.url + "'>تحميل الملف</a>";
@@ -307,6 +321,11 @@
   }, true);
 
   window.addEventListener("beforeunload", flush);
+  var gs = document.getElementById("goStatuses");
+  if (gs) gs.addEventListener("click", function (ev) {
+    ev.preventDefault();
+    flush().then(function () { location.href = gs.href; });
+  });
 })();
 </script>
 {% endblock %}

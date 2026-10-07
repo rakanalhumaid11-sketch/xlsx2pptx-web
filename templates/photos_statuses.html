@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+
+  <div class="page-head">
+    <h1>صور أي الحالات؟</h1>
+    <p>
+      أطفئ الحالة التي لا تريد صورها: لا تُعرض للمراجعة ولا تُنزَّل صورها،
+      وتُمسح روابط صورها (قبل وبعد) من الملف الناتج، فلا تظهر لها صورة في التقرير.
+    </p>
+  </div>
+
+  {% if error %}<div class="errors">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ url_for('photos_prep', job_id=job_id) }}">
+
+    <div class="ph-bar">
+      <button type="button" class="btn-small" data-ph="all">تشغيل الكل</button>
+      <button type="button" class="btn-small" data-ph="none">إطفاء الكل</button>
+      <span class="ph-sum">
+        تُراجع <b id="phKeep">0</b> ملاحظة ·
+        تُمسح صور <b id="phDrop" class="ph-drop">0</b>
+      </span>
+    </div>
+
+    {% for g in groups %}
+    {% set i = loop.index0 %}
+    <label class="ph-row" data-key="{{ g.key }}">
+      <span class="switch">
+        <input type="checkbox" name="st_{{ i }}" value="{{ i }}"
+               data-key="{{ g.key }}" data-n="{{ g.n }}"
+               {% if g.key not in off %}checked{% endif %}>
+        <span class="switch-knob" aria-hidden="true"></span>
+      </span>
+      <span class="ph-name">
+        <b>{{ g.short }}</b>
+        <span class="rv-st st-{{ g.kind }}" dir="ltr">{{ g.key or "فارغة" }}</span>
+      </span>
+      <span class="ph-cnt">{{ g.n }} ملاحظة · {{ g.images }} صورة</span>
+    </label>
+    {% endfor %}
+
+    <button class="btn" type="submit">جهّز الصور</button>
+    <span class="hint">اختيارك يحفظه المتصفح، فيأتي جاهزًا مع الملف القادم.</span>
+  </form>
+
+</div>
+
+<script>
+(function () {
+  var KEY = "ph_status_off";
+  var first = {{ 'true' if first else 'false' }};
+  var boxes = Array.prototype.slice.call(document.querySelectorAll(".ph-row input"));
+  function load() { try { return JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { return []; } }
+  function save() {
+    // يُحفظ المطفأ فقط، وحالات لا توجد في هذا الملف تبقى كما كانت
+    var mine = boxes.map(function (b) { return b.dataset.key; });
+    var off = load().filter(function (k) { return mine.indexOf(k) < 0; });
+    boxes.forEach(function (b) { if (!b.checked) off.push(b.dataset.key); });
+    try { localStorage.setItem(KEY, JSON.stringify(off)); } catch (e) {}
+  }
+  function recount() {
+    var keep = 0, drop = 0;
+    boxes.forEach(function (b) {
+      var n = +b.dataset.n || 0;
+      if (b.checked) keep += n; else drop += n;
+      b.closest(".ph-row").classList.toggle("off", !b.checked);
+    });
+    document.getElementById("phKeep").textContent = keep;
+    document.getElementById("phDrop").textContent = drop;
+  }
+  if (first) {
+    var off = load();
+    boxes.forEach(function (b) { b.checked = off.indexOf(b.dataset.key) < 0; });
+    // لو أطفأ الحفظُ كل حالات هذا الملف، تُشغَّل كلها بدل صفحة بلا شيء
+    if (!boxes.some(function (b) { return b.checked; })) {
+      boxes.forEach(function (b) { b.checked = true; });
+    }
+  }
+  boxes.forEach(function (b) {
+    b.addEventListener("change", function () { save(); recount(); });
+  });
+  document.querySelectorAll("[data-ph]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var on = btn.dataset.ph === "all";
+      boxes.forEach(function (b) { b.checked = on; });
+      save(); recount();
+    });
+  });
+  recount();
+})();
+</script>
+{% endblock %}

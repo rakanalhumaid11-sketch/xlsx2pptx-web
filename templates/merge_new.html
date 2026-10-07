@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+
+  <div class="page-head">
+    <h1>دمج الملفات</h1>
+    <p>
+      ارفع ملفات المغذيات بعد أداة حالة الاعتماد، فيخرج ملف واحد: ورقة «الداتا شيت» فيها
+      داتا شيت كل مغذٍّ تحت الأخرى، ثم ورقة لكل مغذٍّ باسمه كما هي.
+    </p>
+  </div>
+
+  {% if error %}<div class="errors">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ url_for('merge_start') }}" enctype="multipart/form-data">
+
+    <label class="dropzone" id="zone" for="excel_files">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="m12 3 9 5-9 5-9-5z"></path><path d="m3 13 9 5 9-5"></path>
+      </svg>
+      <span class="dz-title" id="dzTitle">اسحب ملفات الاعتماد هنا</span>
+      <span class="dz-hint" id="dzHint">ملف لكل مغذٍّ — كما خرج من أداة حالة الاعتماد</span>
+    </label>
+    <input class="hidden-input" id="excel_files" type="file" name="excel_files"
+           accept=".xlsx,.xlsm" multiple required>
+    <p class="file-list" id="list"></p>
+
+    <button class="btn" type="submit">ادمج الملفات</button>
+    <span class="hint">
+      لا يهم ترتيب الرفع: المغذيات تُرتَّب بأسمائها. الأوراق تُنسخ بألوانها وتنسيقها وقوائمها المنسدلة،
+      والداتا شيت تبقى حيّة: غيّر حالة صف في ورقة مغذيه فيتحدّث رقمه. وعند الطباعة كل مغذٍّ في صفحة.
+    </span>
+  </form>
+
+</div>
+
+<script>
+(function () {
+  var input = document.getElementById("excel_files");
+  var zone = document.getElementById("zone");
+  var title = document.getElementById("dzTitle");
+  var list = document.getElementById("list");
+  function show() {
+    var n = input.files ? input.files.length : 0;
+    if (!n) return;
+    zone.classList.add("filled");
+    title.textContent = n + " ملف";
+    list.textContent = Array.prototype.map.call(input.files, function (f) { return f.name; }).join(" · ");
+  }
+  input.addEventListener("change", show);
+  ["dragenter", "dragover"].forEach(function (e) {
+    zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.add("drag"); });
+  });
+  ["dragleave", "drop"].forEach(function (e) {
+    zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.remove("drag"); });
+  });
+  zone.addEventListener("drop", function (ev) {
+    if (ev.dataTransfer && ev.dataTransfer.files.length) { input.files = ev.dataTransfer.files; show(); }
+  });
+})();
+</script>
+{% endblock %}

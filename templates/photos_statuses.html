@@ -5,8 +5,8 @@
   <div class="page-head">
     <h1>صور أي الحالات؟</h1>
     <p>
-      أطفئ الحالة التي لا تريد صورها: لا تُعرض للمراجعة ولا تُنزَّل صورها،
-      وتُمسح روابط صورها (قبل وبعد) من الملف الناتج، فلا تظهر لها صورة في التقرير.
+      أطفئ الحالة التي لا تريد صور «بعد» لها: لا تُعرض للمراجعة، وتُمسح روابط صور «بعد»
+      لملاحظاتها من الملف الناتج فلا تظهر في التقرير. صور «قبل» تبقى كما هي دائمًا.
     </p>
   </div>
 
@@ -19,7 +19,7 @@
       <button type="button" class="btn-small" data-ph="none">إطفاء الكل</button>
       <span class="ph-sum">
         تُراجع <b id="phKeep">0</b> ملاحظة ·
-        تُمسح صور <b id="phDrop" class="ph-drop">0</b>
+        تُمسح صور «بعد» من <b id="phDrop" class="ph-drop">0</b>
       </span>
     </div>
 
@@ -28,7 +28,7 @@
     <label class="ph-row" data-key="{{ g.key }}">
       <span class="switch">
         <input type="checkbox" name="st_{{ i }}" value="{{ i }}"
-               data-key="{{ g.key }}" data-n="{{ g.n }}"
+               data-key="{{ g.key }}" data-n="{{ g.n }}" data-a="{{ g.after }}"
                {% if g.key not in off %}checked{% endif %}>
         <span class="switch-knob" aria-hidden="true"></span>
       </span>
@@ -36,7 +36,7 @@
         <b>{{ g.short }}</b>
         <span class="rv-st st-{{ g.kind }}" dir="ltr">{{ g.key or "فارغة" }}</span>
       </span>
-      <span class="ph-cnt">{{ g.n }} ملاحظة · {{ g.images }} صورة</span>
+      <span class="ph-cnt">{{ g.n }} ملاحظة · {{ g.after }} لها صور «بعد»</span>
     </label>
     {% endfor %}
 
@@ -62,8 +62,7 @@
   function recount() {
     var keep = 0, drop = 0;
     boxes.forEach(function (b) {
-      var n = +b.dataset.n || 0;
-      if (b.checked) keep += n; else drop += n;
+      if (b.checked) keep += +b.dataset.n || 0; else drop += +b.dataset.a || 0;
       b.closest(".ph-row").classList.toggle("off", !b.checked);
     });
     document.getElementById("phKeep").textContent = keep;

@@ -34,7 +34,7 @@
   {% if many_groups %}
   <div class="ph-note">
     {% if off_groups %}
-    صور هذه الحالات لا تُراجع وتُمسح روابطها من الملف:
+    هذه الحالات لا تُراجع، وتُمسح صور «بعد» لها من الملف (صور «قبل» تبقى):
     {% for g in off_groups %}<b>{{ g.short }}</b> {{ g.n }}{% if not loop.last %}، {% endif %}{% endfor %}
     {% else %}
     صور كل الحالات معروضة.
@@ -298,7 +298,7 @@
           "<li><span>عليها ملاحظة مراجعة</span><b>" + r.review_notes + "</b></li>" +
           "<li><span>صورة حُذفت من التقرير والنص مكانها</span><b>" + r.hidden + "</b></li>" +
           (r.returned ? "<li><span>مسترجعة</span><b style='color:#FF6B6B'>" + r.returned + "</b></li>" : "") +
-          (r.photos_cleared ? "<li><span>مُسحت روابط صورها (حالات مطفأة)</span><b style='color:#FF6B6B'>" +
+          (r.photos_cleared ? "<li><span>مُسحت صور «بعد» (حالات مطفأة)</span><b style='color:#FF6B6B'>" +
             r.photos_cleared + "</b></li>" : "") +
           "<li><span>زاويتان مختلفتان</span><b>" + r.not_comparable + "</b></li>" +
           "<li><span>بلا صورة «بعد»</span><b>" + r.no_after + "</b></li>" +

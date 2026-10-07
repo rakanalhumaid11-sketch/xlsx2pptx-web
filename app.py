@@ -28,6 +28,7 @@ import afterfill
 import approval
 import builder
 import matcher
+import merge
 import photoreview
 import sorter
 import summary
@@ -1511,6 +1512,75 @@ def summary_download(job_id):
     date = (state.get("result") or {}).get("date", "")
     return send_file(state["output_path"], as_attachment=True,
                      download_name="ملخص الملاحظات وحالة الإنجاز %s.xlsx" % date.split(" ")[0])
+
+
+# --------------------------------------------------------------------------
+# دمج ملفات حالة الاعتماد: داتا شيت واحدة + ورقة لكل مغذٍّ
+# --------------------------------------------------------------------------
+
+def _merge_state(job_id):
+    d = job_dir(job_id)
+    state = read_state(d)
+    if state.get("kind") != "merge":
+        abort(404)
+    return d, state
+
+
+@app.route("/merge", methods=["GET"])
+def merge_form():
+    cleanup_old_jobs()
+    return render_template("merge_new.html")
+
+
+@app.route("/merge/start", methods=["POST"])
+def merge_start():
+    files = [f for f in request.files.getlist("excel_files") if f and f.filename]
+
+    def fail(msg):
+        return render_template("merge_new.html", error=msg), 400
+
+    if len(files) < 2:
+        return fail("اختر ملفين على الأقل — الدمج يجمع أكثر من ملف.")
+    bad = [f.filename for f in files if not f.filename.lower().endswith((".xlsx", ".xlsm"))]
+    if bad:
+        return fail(f"الملفات يجب أن تكون ‎.xlsx‎ — تحقّق من: {bad[0]}")
+
+    job_id, d = new_job_dir()
+    saved = _save_many(files, d, "in")
+    out_path = os.path.join(d, "output.xlsx")
+    try:
+        with heavy_lock():
+            result = merge.merge(saved, out_path)
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(d, ignore_errors=True)
+        return fail(f"تعذّر الدمج: {exc}")
+    finally:
+        for p, _n in saved:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+    result["date"] = summary.today_riyadh()
+    write_state(d, {"job_id": job_id, "kind": "merge", "result": result,
+                    "output_path": out_path, "created_at": time.time()})
+    return redirect(url_for("merge_result", job_id=job_id))
+
+
+@app.route("/job/<job_id>/merge")
+def merge_result(job_id):
+    _d, state = _merge_state(job_id)
+    return render_template("merge_result.html", job_id=job_id, r=state["result"],
+                           data_title=merge.DATA_TITLE)
+
+
+@app.route("/job/<job_id>/merge/download")
+def merge_download(job_id):
+    _d, state = _merge_state(job_id)
+    if not state.get("output_path") or not os.path.exists(state["output_path"]):
+        abort(404)
+    date = (state.get("result") or {}).get("date", "")
+    return send_file(state["output_path"], as_attachment=True,
+                     download_name="دمج حالة الاعتماد %s.xlsx" % date)
 
 
 if __name__ == "__main__":

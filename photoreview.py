@@ -145,9 +145,10 @@ def status_groups(an: Dict[str, Any]) -> List[Dict[str, Any]]:
         g = groups.get(k)
         if g is None:
             info = status_info(k)
-            g = groups[k] = dict(info, key=k, n=0, images=0, short=short_label(k))
+            g = groups[k] = dict(info, key=k, n=0, images=0, after=0, short=short_label(k))
         g["n"] += 1
         g["images"] += len(n["before"]) + len(n["after"])
+        g["after"] += 1 if n["after"] else 0
     return sorted(groups.values(),
                   key=lambda g: (GROUP_ORDER.index(g["kind"]) if g["kind"] in GROUP_ORDER
                                  else 99, -g["n"]))
@@ -478,8 +479,9 @@ def write_output(an: Dict[str, Any], choices: Dict[int, Dict[str, Any]],
     من الإكسل — الصورة المرفوضة دليلك عند إرجاع العمل — بل يُكتب في عمود
     «صورة المعالجة في التقرير» أنها محذوفة، فيكتب مولّد التقرير النص مكانها.
 
-    off: حالات أطفأ المستخدم صورها — تُمسح روابط صور ملاحظاتها كلها (قبل
-    وبعد) مع الرابط التشعبي للخلية، فلا تظهر لها صورة في التقرير."""
+    off: حالات أطفأ المستخدم صورها — تُمسح روابط صور «بعد» لملاحظاتها مع
+    الرابط التشعبي للخلية، فلا تظهر لها صورة معالجة في التقرير. وصور «قبل»
+    تبقى كما هي: هي صورة الملاحظة نفسها، والتقرير لا يقوم بدونها."""
     cell_values: Dict[Tuple[int, int], Any] = {}
     moved = 0
     gone = off_rows(an, off)
@@ -488,13 +490,15 @@ def write_output(an: Dict[str, Any], choices: Dict[int, Dict[str, Any]],
     drop_links: set = set()
     move_links: Dict[str, str] = {}
     cleared: Dict[str, int] = {}
-    photo_cols = list(an["before_cols"]) + list(an["after_cols"])
+    n_cleared = 0
     for n in an["notes"]:
         if n["row"] not in gone:
             continue
-        lbl = short_label(n.get("status", ""))
-        cleared[lbl] = cleared.get(lbl, 0) + 1
-        for c in photo_cols:
+        if n["after"]:
+            lbl = short_label(n.get("status", ""))
+            cleared[lbl] = cleared.get(lbl, 0) + 1
+            n_cleared += 1
+        for c in an["after_cols"]:
             cell_values[(n["row"], c)] = None
             drop_links.add("%s%d" % (xlsxedit.col_letter(c), n["row"]))
 
@@ -588,7 +592,7 @@ def write_output(an: Dict[str, Any], choices: Dict[int, Dict[str, Any]],
         "review_notes": n_notes,
         "hidden": n_hidden,
         "returned": sum(1 for n in by_row.values() if n.get("returned")),
-        "photos_cleared": len(gone),
+        "photos_cleared": n_cleared,
         "photos_cleared_by": sorted(cleared.items(), key=lambda t: -t[1]),
         "returned_noted": n_ret_noted,
         "stem": os.path.splitext(os.path.basename(src_path))[0],

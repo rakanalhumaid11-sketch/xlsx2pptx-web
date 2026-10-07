@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+
+  <div class="page-head">
+    <h1>الملف المدموج جاهز</h1>
+    <p>{{ r.sheets|length }} مغذٍّ في ملف واحد، وداتا شيت {{ r.data_blocks }} منها في ورقة «{{ data_title }}».</p>
+  </div>
+
+  {% for w in r.warnings %}<div class="errors">{{ w }}</div>{% endfor %}
+
+  <table class="ledger">
+    <thead><tr><th>#</th><th>الورقة</th><th>الملاحظات</th><th>الداتا شيت</th><th>الملف</th></tr></thead>
+    <tbody>
+      {% if r.data_blocks %}
+      <tr class="sum"><td>1</td><td><b>{{ data_title }}</b></td><td></td><td>{{ r.data_blocks }} مغذٍّ، كل واحد تحت الآخر</td><td></td></tr>
+      {% endif %}
+      {% for s in r.sheets %}
+      <tr>
+        <td>{{ loop.index + (1 if r.data_blocks else 0) }}</td>
+        <td dir="ltr"><b>{{ s.name }}</b></td>
+        <td>{{ s.notes }}</td>
+        {% if s.data %}<td class="ok">موجودة</td>{% else %}<td class="warn">لا توجد</td>{% endif %}
+        <td class="sm-dim">{{ s.file }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <a class="btn" href="{{ url_for('merge_download', job_id=job_id) }}">تحميل الملف</a>
+  <span class="hint">
+    يفتح على «{{ data_title }}». صيغها تقرأ أوراق المغذيات في الملف نفسه، فالتعديل في أي ورقة يظهر فيها.
+  </span>
+
+  <p style="margin-top: 26px">
+    <a class="back-link" href="{{ url_for('merge_form') }}">دمج ملفات أخرى</a>
+  </p>
+
+</div>
+{% endblock %}

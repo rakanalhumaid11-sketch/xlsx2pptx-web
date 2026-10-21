@@ -42,6 +42,17 @@ COLS = [
 ]
 OTHER_COL = ("other", "ألوان أخرى", "FFF2CC", "7F6000")
 
+# ألوان الرسم: الأخضر والأحمر بمعنى المستخدم نفسه، والرمادي لـ«بلا لون».
+# الأخضر والأحمر متباعدان بما يكفي لعمى الألوان الأحمر-الأخضر (قِيس: فرق 8.4)،
+# ومع ذلك كل شريحة عليها رقمها وبين الشرائح فاصل أبيض، فلا يعتمد الفهم على اللون
+CHART_SERIES = [
+    ("done", "المنجز", "1F8A5A", "FFFFFF"),
+    # بلا «MV» في مفتاح الرسم: كلمة لاتينية في آخر نص عربي تقفز إلى أوله
+    ("mv", "متبقٍّ جهد متوسط — يحتاج فصل", "D9483B", "FFFFFF"),
+    ("lv", "متبقٍّ جهد منخفض — ممكن العمل عليه", "A6A6A6", "262626"),
+]
+CHART_OTHER = ("other", "ألوان أخرى", "D9A520", "262626")
+
 
 def bucket(shown: str, static: str) -> str:
     """done / mv / lv / other لملاحظة واحدة من لونها الظاهر ولونها المخزَّن."""
@@ -187,13 +198,108 @@ def build_front(rows: List[Dict[str, Any]], date_text: str):
         pct_col = merge.col_letter(2 + [k for k, *_r in cols].index("pct"))
         sb.databar("%s%d:%s%d" % (pct_col, first, pct_col, lastrow), "5B9BD5")
 
-        sb.set(tot + 2, 1, "الأخضر مقفل · الأحمر والأزرق يحتاج فصل جهد متوسط MV · "
-               "بلا لون جهد منخفض ممكن العمل عليه. اضغط اسم المغذي لفتح ورقته.", s["note"])
-        sb.merge(tot + 2, 1, tot + 2, last)
-        sb.height(tot + 2, 30)
-        return sb.to_xml()
+        # الرسم تحت الجدول بعرضه، وطوله على عدد المغذيات
+        col_of = {k: 2 + j for j, (k, *_r) in enumerate(cols)}
+        series = [se for se in CHART_SERIES + ([CHART_OTHER] if show_other else [])]
+        names = [sheet_of.get(r["path"], r["name"]) for r in rows]
+        chart = bar_chart(SHEET_TITLE, names, "$B$%d:$B$%d" % (first, lastrow), [
+            {"name": label, "color": color, "label": ink,
+             "ref": "$%s$%d:$%s$%d" % (merge.col_letter(col_of[key]), first,
+                                       merge.col_letter(col_of[key]), lastrow),
+             "values": [r[key] for r in rows]}
+            for key, label, color, ink in series])
+        top = tot + 1                               # صف فارغ بين الجدول والرسم (ترقيم من صفر)
+        height = max(16, 7 + 3 * len(rows))
+        sb.drawing_rid = "rId1"
+        return sb.to_xml(), [(chart, (1, top, last + 1, top + height))]
 
     return front
+
+
+def _txpr(size: int, bold: bool, color: str) -> str:
+    return ('<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="%d" b="%d">'
+            '<a:solidFill><a:srgbClr val="%s"/></a:solidFill><a:latin typeface="Arial"/>'
+            '<a:cs typeface="Arial"/></a:defRPr></a:pPr><a:endParaRPr lang="ar-SA"/></a:p>'
+            "</c:txPr>" % (size, 1 if bold else 0, color))
+
+
+def bar_chart(sheet: str, categories: List[str], cat_ref: str,
+              series: List[Dict[str, Any]]) -> str:
+    """أشرطة أفقية متراكبة، شريط لكل مغذٍّ وأوله في الأعلى، وعلى كل شريحة رقمها.
+
+    القيم المحسوبة مخزّنة في الرسم نفسه فيظهر كاملًا في عارض الجوال، وهو
+    مربوط بخلايا الجدول فيتحدّث معها في إكسل. محور القيم مخفي: الأرقام على
+    الشرائح تغني عنه وتُبقي الرسم نظيفًا."""
+    q = merge.quote_sheet(sheet)
+    esc = merge.esc
+
+    def str_cache(items: List[str]) -> str:
+        return '<c:strCache><c:ptCount val="%d"/>%s</c:strCache>' % (
+            len(items), "".join('<c:pt idx="%d"><c:v>%s</c:v></c:pt>' % (i, esc(v))
+                                for i, v in enumerate(items)))
+
+    def num_cache(vals: List[float]) -> str:
+        return ('<c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="%d"/>%s'
+                "</c:numCache>" % (len(vals), "".join(
+                    '<c:pt idx="%d"><c:v>%s</c:v></c:pt>' % (i, v) for i, v in enumerate(vals))))
+
+    sers = []
+    for i, se in enumerate(series):
+        sers.append(
+            '<c:ser><c:idx val="%d"/><c:order val="%d"/>'
+            "<c:tx><c:v>%s</c:v></c:tx>"
+            '<c:spPr><a:solidFill><a:srgbClr val="%s"/></a:solidFill>'
+            '<a:ln w="19050"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:ln></c:spPr>'
+            '<c:invertIfNegative val="0"/>'
+            # الصفر لا يُكتب: شريحة بلا عرض لا تحتاج رقمًا فوقها
+            '<c:dLbls><c:numFmt formatCode="0;;;" sourceLinked="0"/>'
+            "<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>%s"
+            '<c:dLblPos val="ctr"/><c:showLegendKey val="0"/><c:showVal val="1"/>'
+            '<c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/>'
+            '<c:showBubbleSize val="0"/></c:dLbls>'
+            "<c:cat><c:strRef><c:f>%s!%s</c:f>%s</c:strRef></c:cat>"
+            "<c:val><c:numRef><c:f>%s!%s</c:f>%s</c:numRef></c:val></c:ser>" % (
+                i, i, esc(se["name"]), se["color"], _txpr(1100, True, se["label"]),
+                q, cat_ref, str_cache(categories), q, se["ref"], num_cache(se["values"])))
+
+    title = ('<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr>'
+             '<a:defRPr sz="1500" b="1"><a:solidFill><a:srgbClr val="1F3864"/></a:solidFill>'
+             '<a:latin typeface="Arial"/><a:cs typeface="Arial"/></a:defRPr></a:pPr>'
+             '<a:r><a:rPr lang="ar-SA" sz="1500" b="1"><a:solidFill><a:srgbClr val="1F3864"/>'
+             '</a:solidFill><a:latin typeface="Arial"/><a:cs typeface="Arial"/></a:rPr>'
+             "<a:t>المنجز والمتبقي حسب المغذي</a:t></a:r></a:p></c:rich></c:tx>"
+             '<c:overlay val="0"/></c:title>')
+    axis_ln = ('<c:spPr><a:noFill/><a:ln w="9525"><a:solidFill><a:srgbClr val="BFBFBF"/>'
+               "</a:solidFill></a:ln></c:spPr>")
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        '<c:chartSpace xmlns:c="%s" xmlns:a="%s" xmlns:r="%s">'
+        '<c:date1904 val="0"/><c:lang val="ar-SA"/><c:roundedCorners val="0"/>'
+        "<c:chart>%s"
+        '<c:autoTitleDeleted val="0"/><c:plotArea><c:layout/>'
+        '<c:barChart><c:barDir val="bar"/><c:grouping val="stacked"/><c:varyColors val="0"/>'
+        '%s<c:gapWidth val="55"/><c:overlap val="100"/>'
+        '<c:axId val="51236301"/><c:axId val="51236302"/></c:barChart>'
+        # أول مغذٍّ في الأعلى كما في الجدول
+        '<c:catAx><c:axId val="51236301"/><c:scaling><c:orientation val="maxMin"/></c:scaling>'
+        '<c:delete val="0"/><c:axPos val="l"/><c:numFmt formatCode="General" sourceLinked="1"/>'
+        '<c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>'
+        '%s%s<c:crossAx val="51236302"/><c:crosses val="autoZero"/><c:auto val="1"/>'
+        '<c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>'
+        # الأشرطة تبدأ من اليمين كقراءة العربية، وأسماء المغذيات على اليمين
+        '<c:valAx><c:axId val="51236302"/><c:scaling><c:orientation val="maxMin"/>'
+        '<c:min val="0"/></c:scaling><c:delete val="1"/><c:axPos val="b"/>'
+        '<c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/>'
+        '<c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>'
+        '<c:crossAx val="51236301"/><c:crosses val="autoZero"/><c:crossBetween val="between"/>'
+        "</c:valAx><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr></c:plotArea>"
+        '<c:legend><c:legendPos val="b"/><c:overlay val="0"/>%s</c:legend>'
+        '<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>'
+        '<c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>'
+        '<a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr>'
+        "</c:chartSpace>" % (
+            merge.C_NS, merge.A_NS, merge.REL_NS, title, "".join(sers),
+            axis_ln, _txpr(1100, True, "1F3864"), _txpr(1000, False, "404040")))
 
 
 def build(files: List[Tuple[str, str]], out_path: str, today: str = "") -> Dict[str, Any]:

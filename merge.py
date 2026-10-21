@@ -35,6 +35,10 @@ REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 CT_SHEET = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
 CT_TABLE = "application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"
+CT_DRAWING = "application/vnd.openxmlformats-officedocument.drawing+xml"
+CT_CHART = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+C_NS = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
 DATA_TITLE = "الداتا شيت"
 GAP = 2                      # صفان فارغان بين داتا شيت مغذٍّ والذي بعده
@@ -799,7 +803,31 @@ def merge(files: List[Tuple[str, str]], out_path: str, *, include_data: bool = T
         styles_xml = styles.render()
         if front:
             xst = xlsxedit.Styles(styles_xml)
-            sheets_out.append((front[0], front[1](xst, sources)))
+            got = front[1](xst, sources)
+            front_xml, charts = got if isinstance(got, tuple) else (got, [])
+            if charts:
+                # رسوم الورقة الأمامية: drawing واحد فيه كل رسم، وأسماء أجزائها لا
+                # تتصادم مع رسوم منسوخة من ملفات المغذيات (copier يحجزها أولًا)
+                rel_t = REL_NS + "/"
+                head = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+                        '<Relationships xmlns="%s">' % PKG_REL_NS)
+                chart_parts = []
+                for cx, _a in charts:
+                    cp = copier._unique("xl/charts/chart1.xml")
+                    copier.parts[cp] = cx.encode("utf-8")
+                    copier.overrides["/" + cp] = CT_CHART
+                    chart_parts.append(cp)
+                dp = copier._unique("xl/drawings/drawing1.xml")
+                copier.parts[dp] = xlsxedit._drawing_xml([a for _x, a in charts]).encode("utf-8")
+                copier.overrides["/" + dp] = CT_DRAWING
+                copier.parts[_part_rels(dp)] = (head + "".join(
+                    '<Relationship Id="rId%d" Type="%schart" Target="../charts/%s"/>'
+                    % (k + 1, rel_t, posixpath.basename(cp))
+                    for k, cp in enumerate(chart_parts)) + "</Relationships>").encode("utf-8")
+                sheet_rels[len(sheets_out)] = (
+                    head + '<Relationship Id="rId1" Type="%sdrawing" Target="../drawings/%s"/>'
+                    "</Relationships>" % (rel_t, posixpath.basename(dp)))
+            sheets_out.append((front[0], front_xml))
             styles_xml = xst.render()
         blocks = []
         for s, (xf, dxf, sm, rename) in zip(sources, maps):

@@ -270,6 +270,7 @@ class SheetBuilder:
         self.widths: Dict[int, float] = {}
         self.heights: Dict[int, float] = {}
         self.databars: List[Tuple[str, str]] = []
+        self.links: List[Tuple[str, str]] = []
         self.drawing_rid = ""          # يُضبط عند إرفاق رسم بياني بالورقة
 
     def set(self, row: int, col: int, value: Any, style: Optional[int] = None,
@@ -292,6 +293,10 @@ class SheetBuilder:
 
     def databar(self, sqref: str, color: str = "4CAF7D"):
         self.databars.append((sqref, color))
+
+    def link(self, row: int, col: int, location: str):
+        """رابط داخلي: الضغط على الخلية ينقل إلى موضع في الملف («'M10'!A1»)."""
+        self.links.append(("%s%d" % (col_letter(col), row), location))
 
     def _cell_xml(self, row: int, col: int) -> str:
         value, style, formula = self.cells[(row, col)]
@@ -338,6 +343,11 @@ class SheetBuilder:
             '<dataBar><cfvo type="num" val="0"/><cfvo type="num" val="1"/>'
             '<color rgb="FF%s"/></dataBar></cfRule></conditionalFormatting>'
             % (sq, i + 1, color.upper()) for i, (sq, color) in enumerate(self.databars))
+        if self.links:
+            cf += "<hyperlinks>%s</hyperlinks>" % "".join(
+                '<hyperlink ref="%s" location="%s"/>'
+                % (ref, esc(loc).replace('"', "&quot;"))
+                for ref, loc in self.links)
 
         return (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'

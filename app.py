@@ -30,6 +30,7 @@ import builder
 import matcher
 import merge
 import photoreview
+import progress
 import sorter
 import summary
 import zones
@@ -1581,6 +1582,75 @@ def merge_download(job_id):
     date = (state.get("result") or {}).get("date", "")
     return send_file(state["output_path"], as_attachment=True,
                      download_name="دمج حالة الاعتماد %s.xlsx" % date)
+
+
+# --------------------------------------------------------------------------
+# المنجز والمتبقي: جدول لكل المغذيات + ورقة كل مغذٍّ كما هي
+# --------------------------------------------------------------------------
+
+def _progress_state(job_id):
+    d = job_dir(job_id)
+    state = read_state(d)
+    if state.get("kind") != "progress":
+        abort(404)
+    return d, state
+
+
+@app.route("/remaining", methods=["GET"])
+def progress_form():
+    cleanup_old_jobs()
+    return render_template("progress_new.html")
+
+
+@app.route("/remaining/start", methods=["POST"])
+def progress_start():
+    files = [f for f in request.files.getlist("excel_files") if f and f.filename]
+
+    def fail(msg):
+        return render_template("progress_new.html", error=msg), 400
+
+    if not files:
+        return fail("اختر ملفات المغذيات أولًا.")
+    bad = [f.filename for f in files if not f.filename.lower().endswith((".xlsx", ".xlsm"))]
+    if bad:
+        return fail(f"الملفات يجب أن تكون ‎.xlsx‎ — تحقّق من: {bad[0]}")
+
+    job_id, d = new_job_dir()
+    saved = _save_many(files, d, "in")
+    out_path = os.path.join(d, "output.xlsx")
+    try:
+        with heavy_lock():
+            result = progress.build(saved, out_path, today=request.form.get("today", ""))
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(d, ignore_errors=True)
+        return fail(f"تعذّرت قراءة الملفات: {exc}")
+    finally:
+        for p, _n in saved:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+    for r in result["rows"]:
+        r.pop("path", None)
+    write_state(d, {"job_id": job_id, "kind": "progress", "result": result,
+                    "output_path": out_path, "created_at": time.time()})
+    return redirect(url_for("progress_result", job_id=job_id))
+
+
+@app.route("/job/<job_id>/remaining")
+def progress_result(job_id):
+    _d, state = _progress_state(job_id)
+    return render_template("progress_result.html", job_id=job_id, r=state["result"])
+
+
+@app.route("/job/<job_id>/remaining/download")
+def progress_download(job_id):
+    _d, state = _progress_state(job_id)
+    if not state.get("output_path") or not os.path.exists(state["output_path"]):
+        abort(404)
+    date = (state.get("result") or {}).get("date", "")
+    return send_file(state["output_path"], as_attachment=True,
+                     download_name="المنجز والمتبقي %s.xlsx" % date)
 
 
 if __name__ == "__main__":

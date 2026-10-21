@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+
+  <div class="page-head">
+    <h1>جدول المنجز والمتبقي جاهز</h1>
+    <p>{{ r.rows|length }} مغذٍّ، بتاريخ <span dir="ltr">{{ r.date }}</span>. وفي الملف بعد الجدول ورقة كل مغذٍّ كما هي.</p>
+  </div>
+
+  {% for w in r.warnings %}<div class="errors">{{ w }}</div>{% endfor %}
+
+  {% set T = namespace(t=0, d=0, mv=0, lv=0, o=0) %}
+  <table class="ledger pg-tab">
+    <thead><tr>
+      <th>المغذي</th><th>الإجمالي</th><th class="pg-done">المنجز</th><th>نسبة الإنجاز</th>
+      <th class="pg-mv">المتبقي جهد متوسط<br><em>يحتاج فصل MV</em></th>
+      <th class="pg-lv">المتبقي جهد منخفض<br><em>ممكن العمل عليه</em></th>
+      {% if r.other %}<th>ألوان أخرى</th>{% endif %}
+    </tr></thead>
+    <tbody>
+      {% for x in r.rows %}
+      {% set T.t = T.t + x.total %}{% set T.d = T.d + x.done %}{% set T.mv = T.mv + x.mv %}{% set T.lv = T.lv + x.lv %}{% set T.o = T.o + x.other %}
+      <tr>
+        <td dir="ltr"><b>{{ x.sheet }}</b></td>
+        <td><b>{{ x.total }}</b></td>
+        <td class="ok">{{ x.done }}</td>
+        <td><b>{{ (100 * x.done / x.total)|round|int if x.total else 0 }}%</b></td>
+        <td class="pg-mvn">{{ x.mv }}</td>
+        <td>{{ x.lv }}</td>
+        {% if r.other %}<td class="warn">{{ x.other }}</td>{% endif %}
+      </tr>
+      {% endfor %}
+      <tr class="sum">
+        <td>الإجمالي</td><td><b>{{ T.t }}</b></td><td class="ok">{{ T.d }}</td>
+        <td><b>{{ (100 * T.d / T.t)|round|int if T.t else 0 }}%</b></td>
+        <td class="pg-mvn">{{ T.mv }}</td><td>{{ T.lv }}</td>
+        {% if r.other %}<td class="warn">{{ T.o }}</td>{% endif %}
+      </tr>
+    </tbody>
+  </table>
+
+  <a class="btn" href="{{ url_for('progress_download', job_id=job_id) }}">تحميل الملف</a>
+  <span class="hint">الملف يفتح على الجدول، واسم كل مغذٍّ فيه رابط ينقلك إلى ورقته.</span>
+
+  <p style="margin-top: 26px">
+    <a class="back-link" href="{{ url_for('progress_form') }}">ملفات أخرى</a>
+  </p>
+
+</div>
+{% endblock %}

@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import builder
 import sorter
+import xlsxedit
 from xlsxedit import _get_attr, _set_attr, col_index, col_letter, esc
 
 MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -737,8 +738,13 @@ def _drop_rel_elements(xml: str, gone: set) -> str:
 
 # ------------------------------------------------------------------ الدمج
 
-def merge(files: List[Tuple[str, str]], out_path: str) -> Dict[str, Any]:
-    """files: [(المسار، الاسم المعروض)]. يكتب الملف المدموج ويرجع ملخّصه."""
+def merge(files: List[Tuple[str, str]], out_path: str, *, include_data: bool = True,
+          front: Optional[Tuple[str, Any]] = None) -> Dict[str, Any]:
+    """files: [(المسار، الاسم المعروض)]. يكتب الملف المدموج ويرجع ملخّصه.
+
+    include_data: ورقة الداتا شيت المدموجة (أداة الدمج). front: ‏(اسم، دالة)
+    لورقة أولى تبنيها أداة أخرى قبل أوراق المغذيات — الدالة تأخذ جدول الأنماط
+    (xlsxedit.Styles) والملفات بأسماء أوراقها، وترجع XML الورقة."""
     sources: List[Source] = []
     warnings: List[str] = []
     try:
@@ -755,7 +761,7 @@ def merge(files: List[Tuple[str, str]], out_path: str) -> Dict[str, Any]:
         sources.sort(key=lambda s: sorter.natural_key(s.code or s.display))
 
         # اسم كل ورقة: رمز المغذي، وإن تكرّر المغذي أُلحق به رقم
-        used = {DATA_TITLE}
+        used = {DATA_TITLE} | ({front[0]} if front else set())
         for s in sources:
             base = safe_sheet_name(s.code or os.path.splitext(s.display)[0])
             name, k = base, 2
@@ -767,7 +773,7 @@ def merge(files: List[Tuple[str, str]], out_path: str) -> Dict[str, Any]:
                                 % (base, s.display, name))
             used.add(name)
             s.sheet_name = name
-            if not s.data_part:
+            if include_data and not s.data_part:
                 warnings.append("الملف «%s» بلا داتا شيت — شغّله على أداة حالة الاعتماد أولًا ليظهر في ورقة الداتا شيت."
                                 % s.display)
             if s.has_cell_images:
@@ -789,15 +795,22 @@ def merge(files: List[Tuple[str, str]], out_path: str) -> Dict[str, Any]:
         sheet_rels: Dict[int, str] = {}
         defined: List[str] = []
 
-        # الداتا شيت المدموجة أولًا
+        # الورقة الأمامية (إن وُجدت) ثم الداتا شيت المدموجة
+        styles_xml = styles.render()
+        if front:
+            xst = xlsxedit.Styles(styles_xml)
+            sheets_out.append((front[0], front[1](xst, sources)))
+            styles_xml = xst.render()
         blocks = []
         for s, (xf, dxf, sm, rename) in zip(sources, maps):
-            if s.data_xml:
+            if include_data and s.data_xml:
                 blocks.append({"xml": s.data_xml, "src": s,
                                "map": SheetMap(xf, dxf, sm, rename, self_name=s.data_name)})
         starts: List[int] = []
         if blocks:
             data_xml, starts = build_data_sheet(blocks, sst)
+            if front:
+                data_xml = re.sub(r'\stabSelected="\d"', "", data_xml)
             sheets_out.append((DATA_TITLE, data_xml))
 
         for s, (xf, dxf, sm, rename) in zip(sources, maps):
@@ -884,7 +897,7 @@ def merge(files: List[Tuple[str, str]], out_path: str) -> Dict[str, Any]:
                           'Target="xl/workbook.xml"/></Relationships>' % (PKG_REL_NS, REL_NS))
             zout.writestr("xl/workbook.xml", workbook)
             zout.writestr("xl/_rels/workbook.xml.rels", "".join(wb_rels))
-            zout.writestr("xl/styles.xml", styles.render())
+            zout.writestr("xl/styles.xml", styles_xml)
             zout.writestr("xl/sharedStrings.xml", sst.render())
             if theme:
                 zout.writestr("xl/theme/theme1.xml", theme)

@@ -24,7 +24,7 @@
     </div>
 
     <div class="nav">
-      <a href="{{ url_for('index') }}" {% if not ep.startswith(('after', 'zones', 'match', 'approve', 'sort', 'photos', 'summary', 'merge')) %}class="active"{% endif %}>
+      <a href="{{ url_for('index') }}" {% if not ep.startswith(('after', 'zones', 'match', 'approve', 'sort', 'photos', 'summary', 'merge', 'progress')) %}class="active"{% endif %}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="1.7"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M14 3v5h5"></path>
@@ -93,6 +93,13 @@
           <path d="M4 20V10"></path><path d="M10 20V4"></path><path d="M16 20v-7"></path><path d="M3 20h18"></path>
         </svg>
         ملخص الأداء
+      </a>
+      <a href="{{ url_for('progress_form') }}" {% if ep.startswith('progress') %}class="active"{% endif %}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 5h18v14H3z"></path><path d="M3 10h18"></path><path d="M9 10v9"></path>
+        </svg>
+        المنجز والمتبقي
       </a>
     </div>
   </nav>

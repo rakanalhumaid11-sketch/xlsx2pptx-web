@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="wrap">
+
+  <div class="page-head">
+    <h1>المنجز والمتبقي</h1>
+    <p>
+      ارفع ملفات المغذيات بعد التلوين، فيخرج ملف إكسل أوله جدول: لكل مغذٍّ الإجمالي والمنجز ونسبة الإنجاز
+      والمتبقي جهد متوسط والمتبقي جهد منخفض. وبعده ملف كل مغذٍّ كما هو، واسمه في الجدول رابط يفتحه.
+    </p>
+  </div>
+
+  {% if error %}<div class="errors">{{ error }}</div>{% endif %}
+
+  <form method="post" action="{{ url_for('progress_start') }}" enctype="multipart/form-data">
+
+    <label class="dropzone" id="zone" for="excel_files">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke-width="1.5"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="m12 3 9 5-9 5-9-5z"></path><path d="m3 13 9 5 9-5"></path>
+      </svg>
+      <span class="dz-title" id="dzTitle">اسحب ملفات المغذيات هنا</span>
+      <span class="dz-hint" id="dzHint">ملف لكل مغذٍّ — بعد أداة حالة الاعتماد والتلوين</span>
+    </label>
+    <input class="hidden-input" id="excel_files" type="file" name="excel_files"
+           accept=".xlsx,.xlsm" multiple required>
+    <p class="file-list" id="list"></p>
+
+    <input type="hidden" name="today" id="today">
+    <button class="btn" type="submit">أنشئ الجدول</button>
+    <span class="hint">
+      الأخضر مقفل، والأحمر والأزرق يحتاج فصل جهد متوسط MV، وبلا لون جهد منخفض ممكن العمل عليه.
+      الأوراق تُنسخ بألوانها وتنسيقها كما هي.
+    </span>
+  </form>
+
+</div>
+
+<script>
+(function () {
+  // تاريخ اليوم في رأس الجدول من جهازك لا من ساعة الخادم
+  var d = new Date(), p = function (n) { return (n < 10 ? "0" : "") + n; };
+  document.getElementById("today").value = d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  var input = document.getElementById("excel_files");
+  var zone = document.getElementById("zone");
+  var title = document.getElementById("dzTitle");
+  var list = document.getElementById("list");
+  function show() {
+    var n = input.files ? input.files.length : 0;
+    if (!n) return;
+    zone.classList.add("filled");
+    title.textContent = n + " ملف";
+    list.textContent = Array.prototype.map.call(input.files, function (f) { return f.name; }).join(" · ");
+  }
+  input.addEventListener("change", show);
+  ["dragenter", "dragover"].forEach(function (e) {
+    zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.add("drag"); });
+  });
+  ["dragleave", "drop"].forEach(function (e) {
+    zone.addEventListener(e, function (ev) { ev.preventDefault(); zone.classList.remove("drag"); });
+  });
+  zone.addEventListener("drop", function (ev) {
+    if (ev.dataTransfer && ev.dataTransfer.files.length) { input.files = ev.dataTransfer.files; show(); }
+  });
+})();
+</script>
+{% endblock %}

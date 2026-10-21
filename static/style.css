@@ -1089,3 +1089,10 @@ input[type="number"] { -moz-appearance: textfield; }
   .ph-row { flex-wrap: wrap; }
   .ph-cnt { flex-basis: 100%; margin-inline-start: 60px; }
 }
+
+/* ---------------------------------------------------- المنجز والمتبقي */
+
+.pg-tab th em { font-style: normal; font-weight: 400; font-size: 11px; opacity: .8; }
+.pg-tab th.pg-done { color: var(--ok); }
+.pg-tab th.pg-mv, .pg-tab td.pg-mvn { color: var(--danger); }
+.pg-tab td, .pg-tab th { text-align: center; }
